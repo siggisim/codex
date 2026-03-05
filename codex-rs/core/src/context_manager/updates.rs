@@ -47,15 +47,14 @@ impl TurnContextDiffFragment for PermissionsUpdateFragment {
         }
 
         Some(Self {
-            text: DeveloperInstructions::from_policy(
+            text: DeveloperInstructions::from_policy_text(
                 turn_context.sandbox_policy.get(),
                 turn_context.approval_policy.value(),
                 turn_context.features.enabled(Feature::GuardianApproval),
                 context.exec_policy,
                 &turn_context.cwd,
                 turn_context.features.enabled(Feature::RequestPermissions),
-            )
-            .into_text(),
+            ),
         })
     }
 }
@@ -86,10 +85,9 @@ impl TurnContextDiffFragment for CollaborationModeUpdateFragment {
             // If the next mode has empty developer instructions, this returns None and we emit no
             // update, so prior collaboration instructions remain in the prompt history.
             Some(Self {
-                text: DeveloperInstructions::from_collaboration_mode(
+                text: DeveloperInstructions::from_collaboration_mode_text(
                     &turn_context.collaboration_mode,
-                )?
-                .into_text(),
+                )?,
             })
         } else {
             None
@@ -120,7 +118,7 @@ impl TurnContextDiffFragment for RealtimeUpdateFragment {
     ) -> Option<Self> {
         if turn_context.realtime_active {
             return Some(Self {
-                text: DeveloperInstructions::realtime_start_message().into_text(),
+                text: DeveloperInstructions::realtime_start_text(),
             });
         }
 
@@ -129,7 +127,7 @@ impl TurnContextDiffFragment for RealtimeUpdateFragment {
             .and_then(|settings| settings.realtime_active)
             .filter(|realtime_active| *realtime_active)
             .map(|_| Self {
-                text: DeveloperInstructions::realtime_end_message("inactive").into_text(),
+                text: DeveloperInstructions::realtime_end_text("inactive"),
             })
     }
 
@@ -140,10 +138,10 @@ impl TurnContextDiffFragment for RealtimeUpdateFragment {
     ) -> Option<Self> {
         match (previous.realtime_active, turn_context.realtime_active) {
             (Some(true), false) => Some(Self {
-                text: DeveloperInstructions::realtime_end_message("inactive").into_text(),
+                text: DeveloperInstructions::realtime_end_text("inactive"),
             }),
             (Some(false), true) => Some(Self {
-                text: DeveloperInstructions::realtime_start_message().into_text(),
+                text: DeveloperInstructions::realtime_start_text(),
             }),
             (Some(true), true) | (Some(false), false) | (None, false) | (None, true) => None,
         }
@@ -185,8 +183,7 @@ impl TurnContextDiffFragment for PersonalityUpdateFragment {
             let model_info = &turn_context.model_info;
             let personality_message = personality_message_for(model_info, personality)?;
             Some(Self {
-                text: DeveloperInstructions::personality_spec_message(personality_message)
-                    .into_text(),
+                text: DeveloperInstructions::personality_spec_text(personality_message),
             })
         } else {
             None
@@ -228,7 +225,7 @@ impl TurnContextDiffFragment for ModelInstructionsUpdateFragment {
         }
 
         Some(Self {
-            text: DeveloperInstructions::model_switch_message(model_instructions).into_text(),
+            text: DeveloperInstructions::model_switch_text(model_instructions),
         })
     }
 
@@ -249,7 +246,7 @@ impl TurnContextDiffFragment for ModelInstructionsUpdateFragment {
         }
 
         Some(Self {
-            text: DeveloperInstructions::model_switch_message(model_instructions).into_text(),
+            text: DeveloperInstructions::model_switch_text(model_instructions),
         })
     }
 }
