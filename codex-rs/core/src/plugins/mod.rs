@@ -35,5 +35,5 @@ pub use marketplace::MarketplacePluginAuthPolicy;
 pub use marketplace::MarketplacePluginInstallPolicy;
 pub use marketplace::MarketplacePluginSourceSummary;
 pub(crate) use render::render_explicit_plugin_instructions;
-pub(crate) use render::render_plugins_section;
+pub(crate) use render::render_plugin_instructions;
 pub use store::PluginId;

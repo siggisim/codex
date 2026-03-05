@@ -221,6 +221,7 @@ use crate::mentions::collect_tool_mentions_from_messages;
 use crate::network_policy_decision::execpolicy_network_rule_amendment;
 use crate::plugins::PluginsManager;
 use crate::plugins::build_plugin_injections;
+use crate::plugins::render_plugin_instructions;
 use crate::project_doc::get_user_instructions;
 use crate::protocol::AgentMessageContentDeltaEvent;
 use crate::protocol::AgentReasoningSectionBreakEvent;
@@ -3434,6 +3435,15 @@ impl Session {
         {
             contextual_user_envelope.push_fragment(user_instructions);
         }
+        let loaded_plugins = self
+            .services
+            .plugins_manager
+            .plugins_for_config(&turn_context.config);
+        if let Some(plugin_instructions) =
+            render_plugin_instructions(loaded_plugins.capability_summaries())
+        {
+            contextual_user_envelope.push_fragment(plugin_instructions);
+        }
         let subagents = self
             .services
             .agent_control
@@ -3456,8 +3466,8 @@ impl Session {
         if let Some(developer_message) = developer_envelope.build() {
             items.push(developer_message);
         }
-        if let Some(contextual_user_message) = contextual_user_envelope.build() {
-            items.push(contextual_user_message);
+        if let Some(model_visible_context) = contextual_user_envelope.build() {
+            items.push(model_visible_context);
         }
         items
     }

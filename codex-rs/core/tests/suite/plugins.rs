@@ -167,7 +167,7 @@ fn tool_description(body: &serde_json::Value, tool_name: &str) -> Option<String>
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn plugin_skills_append_to_instructions() -> Result<()> {
+async fn plugin_instructions_are_split_from_agents_instructions() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
@@ -178,7 +178,7 @@ async fn plugin_skills_append_to_instructions() -> Result<()> {
     .await;
 
     let codex_home = Arc::new(TempDir::new()?);
-    write_plugin_skill_plugin(codex_home.as_ref());
+    let skill_path = write_plugin_skill_plugin(codex_home.as_ref());
     let codex = build_plugin_test_codex(&server, Arc::clone(&codex_home)).await?;
 
     codex
@@ -194,21 +194,55 @@ async fn plugin_skills_append_to_instructions() -> Result<()> {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
-    let request_body = request.body_json();
-    let instructions_text = request_body["input"][1]["content"][0]["text"]
-        .as_str()
-        .expect("instructions text");
+    let user_texts = request.message_input_texts("user");
+    let instructions_text = user_texts
+        .iter()
+        .find(|text| text.starts_with("# AGENTS.md instructions for "))
+        .expect("AGENTS instructions text");
+    let plugin_text = user_texts
+        .iter()
+        .find(|text| text.starts_with("<plugins>\n"))
+        .expect("plugins fragment text");
     assert!(
-        instructions_text.contains("## Plugins"),
+        !instructions_text.contains("## Plugins"),
+        "expected plugins section to be separate from AGENTS instructions"
+    );
+    assert!(
+        plugin_text.contains("## Plugins"),
         "expected plugins section present"
     );
     assert!(
-        instructions_text.contains("`sample`"),
-        "expected enabled plugin name in instructions"
+        plugin_text.contains("### Available plugins\n- `sample`"),
+        "expected enabled plugin list in plugin fragment"
+    );
+    assert!(
+        plugin_text.contains("### How to use plugins"),
+        "expected plugin usage guidance heading"
+    );
+    assert!(
+        instructions_text.contains("## Skills"),
+        "expected skills section present"
     );
     assert!(
         instructions_text.contains("sample:sample-search: inspect sample data"),
         "expected namespaced plugin skill summary"
+    );
+    let expected_path = normalize_path(skill_path)?;
+    let expected_path_str = expected_path.to_string_lossy().replace('\\', "/");
+    assert!(
+        instructions_text.contains(&expected_path_str),
+        "expected path {expected_path_str} in instructions"
+    );
+    assert!(
+        user_texts
+            .iter()
+            .position(|text| text == plugin_text)
+            .expect("plugin fragment position")
+            > user_texts
+                .iter()
+                .position(|text| text == instructions_text)
+                .expect("instructions fragment position"),
+        "expected plugin fragment to appear after AGENTS instructions"
     );
 
     Ok(())
