@@ -164,13 +164,13 @@ use crate::config::types::McpServerConfig;
 use crate::config::types::ShellEnvironmentPolicy;
 use crate::context_manager::ContextManager;
 use crate::context_manager::TotalTokenUsageBreakdown;
-use crate::contextual_user_message::ModelVisibleFragment;
-use crate::contextual_user_message::TurnContextFragment;
 use crate::environment_context::EnvironmentContext;
 use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
 #[cfg(test)]
 use crate::exec::StreamOutput;
+use crate::model_visible_context::ModelVisibleContextFragment;
+use crate::model_visible_context::TurnContextFragment;
 use codex_config::CONFIG_TOML_FILE;
 
 mod rollout_reconstruction;
@@ -2658,10 +2658,10 @@ impl Session {
             return;
         };
         let text = format!("Approved command prefix saved:\n{prefixes}");
-        let fragment = DeveloperInstructions::new(text.clone());
-        let message = fragment.clone().into_response_item();
+        let fragment = DeveloperInstructions::new(text);
 
         if let Some(turn_context) = self.turn_context_for_sub_id(sub_id).await {
+            let message = fragment.clone().into_message();
             self.record_conversation_items(&turn_context, std::slice::from_ref(&message))
                 .await;
             return;
@@ -2753,10 +2753,10 @@ impl Session {
             "{action} network rule saved in execpolicy ({list_name}): {}",
             amendment.host
         );
-        let fragment = DeveloperInstructions::new(text.clone());
-        let message = fragment.clone().into_response_item();
+        let fragment = DeveloperInstructions::new(text);
 
         if let Some(turn_context) = self.turn_context_for_sub_id(sub_id).await {
+            let message = fragment.clone().into_message();
             self.record_conversation_items(&turn_context, std::slice::from_ref(&message))
                 .await;
             return;
