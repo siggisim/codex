@@ -3449,7 +3449,7 @@ impl Session {
         }
         if let Some(subagent_roster) = crate::session_prefix::SubagentRosterContext::new(subagents)
         {
-            contextual_user_envelope.push_fragment(subagent_roster);
+            developer_envelope.push(subagent_roster);
         }
 
         let mut items = Vec::with_capacity(2);
