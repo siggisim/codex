@@ -3,11 +3,9 @@ use crate::codex::TurnContext;
 use crate::environment_context::EnvironmentContext;
 use crate::features::Feature;
 use crate::model_visible_context::ContextualUserContextRole;
-use crate::model_visible_context::DEVELOPER_FRAGMENT_SPEC;
 use crate::model_visible_context::DeveloperContextRole;
 use crate::model_visible_context::DeveloperTextFragment;
 use crate::model_visible_context::ModelVisibleContextFragment;
-use crate::model_visible_context::ModelVisibleContextFragmentSpec;
 use crate::model_visible_context::ModelVisibleContextRole;
 use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
@@ -32,10 +30,6 @@ struct PermissionsUpdateFragment {
 
 impl ModelVisibleContextFragment for PermissionsUpdateFragment {
     type Role = DeveloperContextRole;
-
-    fn spec(&self) -> ModelVisibleContextFragmentSpec {
-        DEVELOPER_FRAGMENT_SPEC
-    }
 
     fn render_text(&self) -> String {
         self.text.clone()
@@ -74,10 +68,6 @@ struct CustomDeveloperInstructionsUpdateFragment {
 impl ModelVisibleContextFragment for CustomDeveloperInstructionsUpdateFragment {
     type Role = DeveloperContextRole;
 
-    fn spec(&self) -> ModelVisibleContextFragmentSpec {
-        DEVELOPER_FRAGMENT_SPEC
-    }
-
     fn render_text(&self) -> String {
         self.text.clone()
     }
@@ -106,10 +96,6 @@ struct CollaborationModeUpdateFragment {
 
 impl ModelVisibleContextFragment for CollaborationModeUpdateFragment {
     type Role = DeveloperContextRole;
-
-    fn spec(&self) -> ModelVisibleContextFragmentSpec {
-        DEVELOPER_FRAGMENT_SPEC
-    }
 
     fn render_text(&self) -> String {
         self.text.clone()
@@ -140,10 +126,6 @@ pub(crate) struct RealtimeUpdateFragment {
 
 impl ModelVisibleContextFragment for RealtimeUpdateFragment {
     type Role = DeveloperContextRole;
-
-    fn spec(&self) -> ModelVisibleContextFragmentSpec {
-        DEVELOPER_FRAGMENT_SPEC
-    }
 
     fn render_text(&self) -> String {
         self.text.clone()
@@ -194,10 +176,6 @@ struct PersonalityUpdateFragment {
 impl ModelVisibleContextFragment for PersonalityUpdateFragment {
     type Role = DeveloperContextRole;
 
-    fn spec(&self) -> ModelVisibleContextFragmentSpec {
-        DEVELOPER_FRAGMENT_SPEC
-    }
-
     fn render_text(&self) -> String {
         self.text.clone()
     }
@@ -236,10 +214,6 @@ pub(crate) struct ModelInstructionsUpdateFragment {
 
 impl ModelVisibleContextFragment for ModelInstructionsUpdateFragment {
     type Role = DeveloperContextRole;
-
-    fn spec(&self) -> ModelVisibleContextFragmentSpec {
-        DEVELOPER_FRAGMENT_SPEC
-    }
 
     fn render_text(&self) -> String {
         self.text.clone()
@@ -529,7 +503,6 @@ mod tests {
     use crate::model_visible_context::ContextualUserContextRole;
     use crate::model_visible_context::DeveloperContextRole;
     use crate::model_visible_context::DeveloperTextFragment;
-    use crate::model_visible_context::ModelVisibleContextFragmentSpec;
     use codex_protocol::models::ContentItem;
     use pretty_assertions::assert_eq;
 
@@ -566,10 +539,6 @@ mod tests {
     impl ModelVisibleContextFragment for FakeFragment {
         type Role = ContextualUserContextRole;
 
-        fn spec(&self) -> ModelVisibleContextFragmentSpec {
-            ModelVisibleContextFragmentSpec::contextual_user("<fake>", "</fake>")
-        }
-
         fn render_text(&self) -> String {
             self.text.to_string()
         }
@@ -582,10 +551,6 @@ mod tests {
 
     impl ModelVisibleContextFragment for FakeDeveloperFragment {
         type Role = DeveloperContextRole;
-
-        fn spec(&self) -> ModelVisibleContextFragmentSpec {
-            ModelVisibleContextFragmentSpec::markerless()
-        }
 
         fn render_text(&self) -> String {
             self.text.to_string()
