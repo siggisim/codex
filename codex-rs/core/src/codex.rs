@@ -3458,7 +3458,7 @@ impl Session {
             .plugins_manager
             .plugins_for_config(&turn_context.config);
         if let Some(plugin_instructions) =
-            render_plugins_instructions(loaded_plugins.capability_summaries())
+            render_plugin_instructions(loaded_plugins.capability_summaries())
         {
             contextual_user_envelope.push_fragment(plugin_instructions);
         }
