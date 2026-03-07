@@ -6,6 +6,7 @@ use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
 use crate::features::Feature;
 use crate::file_watcher::WatchRegistration;
+use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::protocol::Event;
 use crate::protocol::Op;
 use crate::protocol::Submission;
@@ -106,16 +107,27 @@ impl CodexThread {
         self.codex.session.total_token_usage().await
     }
 
+    pub(crate) async fn inject_model_visible_fragment_without_turn(
+        &self,
+        fragment: impl ModelVisibleContextFragment,
+    ) {
+        self.inject_response_input_item_without_turn(fragment.into_response_input_item())
+            .await;
+    }
+
     pub(crate) async fn inject_message_without_turn(&self, role: MessageRole, message: String) {
-        let pending_item = ResponseInputItem::Message {
+        self.inject_response_input_item_without_turn(ResponseInputItem::Message {
             role: role.to_string(),
             content: vec![ContentItem::InputText { text: message }],
-        };
-        let pending_items = vec![pending_item];
+        })
+        .await;
+    }
+
+    async fn inject_response_input_item_without_turn(&self, pending_item: ResponseInputItem) {
         let Err(items_without_active_turn) = self
             .codex
             .session
-            .inject_response_items(pending_items)
+            .inject_response_items(vec![pending_item])
             .await
         else {
             return;

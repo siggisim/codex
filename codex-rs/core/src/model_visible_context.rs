@@ -125,6 +125,13 @@ pub(crate) trait ModelVisibleContextFragment {
     {
         model_visible_message::<Self::Role>(self.render_text())
     }
+
+    fn into_response_input_item(self) -> ResponseInputItem
+    where
+        Self: Sized,
+    {
+        model_visible_response_input_item::<Self::Role>(self.render_text())
+    }
 }
 
 pub(crate) struct DeveloperTextFragment {

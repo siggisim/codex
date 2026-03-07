@@ -37,9 +37,15 @@ impl ModelVisibleContextFragment for SubagentRosterContext {
     }
 }
 
-struct SubagentNotification<'a> {
+pub(crate) struct SubagentNotification<'a> {
     agent_id: &'a str,
     status: &'a AgentStatus,
+}
+
+impl<'a> SubagentNotification<'a> {
+    pub(crate) fn new(agent_id: &'a str, status: &'a AgentStatus) -> Self {
+        Self { agent_id, status }
+    }
 }
 
 impl ModelVisibleContextFragment for SubagentNotification<'_> {
@@ -55,10 +61,6 @@ impl ModelVisibleContextFragment for SubagentNotification<'_> {
             "{SUBAGENT_NOTIFICATION_OPEN_TAG}\n{payload_json}\n{SUBAGENT_NOTIFICATION_CLOSE_TAG}"
         )
     }
-}
-
-pub(crate) fn format_subagent_notification_message(agent_id: &str, status: &AgentStatus) -> String {
-    SubagentNotification { agent_id, status }.render_text()
 }
 
 pub(crate) fn format_subagent_context_line(agent_id: &str, agent_nickname: Option<&str>) -> String {

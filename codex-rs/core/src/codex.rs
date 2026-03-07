@@ -3399,50 +3399,54 @@ impl Session {
         if let Some(developer_instructions) = turn_context.developer_instructions.as_deref() {
             developer_envelope.push(CustomDeveloperInstructions::new(developer_instructions));
         }
-        if turn_context.features.enabled(Feature::MemoryTool)
+        let memory_prompt = if turn_context.features.enabled(Feature::MemoryTool)
             && turn_context.config.memories.use_memories
-            && let Some(memory_prompt) =
-                build_memory_tool_developer_instructions(&turn_context.config.codex_home).await
         {
-            developer_envelope.push(DeveloperTextFragment::new(memory_prompt));
-        }
-        if let Some(collab_instructions) = developer_collaboration_mode_text(&collaboration_mode) {
-            developer_envelope.push(DeveloperTextFragment::new(collab_instructions));
-        }
-        if let Some(realtime_update) = crate::context_manager::updates::build_realtime_update_item(
-            reference_context_item.as_ref(),
-            previous_turn_settings.as_ref(),
-            turn_context,
-        ) {
-            developer_envelope.push(DeveloperTextFragment::new(realtime_update));
-        }
-        if self.features.enabled(Feature::Personality)
-            && let Some(personality) = turn_context.personality
-        {
-            let model_info = turn_context.model_info.clone();
-            let has_baked_personality = model_info.supports_personality()
-                && base_instructions == model_info.get_model_instructions(Some(personality));
-            if !has_baked_personality
-                && let Some(personality_message) =
-                    crate::context_manager::updates::personality_message_for(
-                        &model_info,
-                        personality,
+            build_memory_tool_developer_instructions(&turn_context.config.codex_home).await
+        } else {
+            None
+        };
+        let personality_message = if self.features.enabled(Feature::Personality) {
+            turn_context.personality.and_then(|personality| {
+                let model_info = turn_context.model_info.clone();
+                let has_baked_personality = model_info.supports_personality()
+                    && base_instructions == model_info.get_model_instructions(Some(personality));
+                if has_baked_personality {
+                    return None;
+                }
+                crate::context_manager::updates::personality_message_for(&model_info, personality)
+                    .map(developer_personality_spec_text)
+            })
+        } else {
+            None
+        };
+        for developer_text in [
+            memory_prompt,
+            developer_collaboration_mode_text(&collaboration_mode),
+            crate::context_manager::updates::build_realtime_update_item(
+                reference_context_item.as_ref(),
+                previous_turn_settings.as_ref(),
+                turn_context,
+            ),
+            personality_message,
+            turn_context
+                .features
+                .enabled(Feature::Apps)
+                .then(render_apps_section),
+            turn_context
+                .features
+                .enabled(Feature::CodexGitCommit)
+                .then(|| {
+                    commit_message_trailer_instruction(
+                        turn_context.config.commit_attribution.as_deref(),
                     )
-            {
-                developer_envelope.push(DeveloperTextFragment::new(
-                    developer_personality_spec_text(personality_message),
-                ));
-            }
-        }
-        if turn_context.features.enabled(Feature::Apps) {
-            developer_envelope.push(DeveloperTextFragment::new(render_apps_section()));
-        }
-        if turn_context.features.enabled(Feature::CodexGitCommit)
-            && let Some(commit_message_instruction) = commit_message_trailer_instruction(
-                turn_context.config.commit_attribution.as_deref(),
-            )
+                })
+                .flatten(),
+        ]
+        .into_iter()
+        .flatten()
         {
-            developer_envelope.push(DeveloperTextFragment::new(commit_message_instruction));
+            developer_envelope.push(DeveloperTextFragment::new(developer_text));
         }
         if let Some(user_instructions) =
             <AgentsMdInstructions as TurnContextDiffFragment>::from_turn_context(

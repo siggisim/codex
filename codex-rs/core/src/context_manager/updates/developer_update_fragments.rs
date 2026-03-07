@@ -23,6 +23,40 @@ use codex_protocol::models::developer_realtime_start_text;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::TurnContextItem;
 
+fn model_instructions_update_text(
+    previous_model: Option<&str>,
+    turn_context: &TurnContext,
+) -> Option<String> {
+    if previous_model == Some(turn_context.model_info.slug.as_str()) {
+        return None;
+    }
+
+    let model_instructions = turn_context
+        .model_info
+        .get_model_instructions(turn_context.personality);
+    if model_instructions.is_empty() {
+        return None;
+    }
+
+    Some(developer_model_switch_text(model_instructions))
+}
+
+fn realtime_update_text(
+    previous_realtime_active: Option<bool>,
+    current_realtime_active: bool,
+    previous_turn_settings: Option<&PreviousTurnSettings>,
+) -> Option<String> {
+    match (previous_realtime_active, current_realtime_active) {
+        (Some(true), false) => Some(developer_realtime_end_text("inactive")),
+        (Some(false), true) | (None, true) => Some(developer_realtime_start_text()),
+        (Some(true), true) | (Some(false), false) => None,
+        (None, false) => previous_turn_settings
+            .and_then(|settings| settings.realtime_active)
+            .filter(|realtime_active| *realtime_active)
+            .map(|_| developer_realtime_end_text("inactive")),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Settings-update fragments for the developer envelope
 // ---------------------------------------------------------------------------
@@ -140,19 +174,12 @@ impl TurnContextDiffFragment for RealtimeUpdateFragment {
         turn_context: &TurnContext,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
-        if turn_context.realtime_active {
-            return Some(Self {
-                text: developer_realtime_start_text(),
-            });
-        }
-
-        params
-            .previous_turn_settings
-            .and_then(|settings| settings.realtime_active)
-            .filter(|realtime_active| *realtime_active)
-            .map(|_| Self {
-                text: developer_realtime_end_text("inactive"),
-            })
+        realtime_update_text(
+            None,
+            turn_context.realtime_active,
+            params.previous_turn_settings,
+        )
+        .map(|text| Self { text })
     }
 
     fn diff_from_turn_context_item(
@@ -160,22 +187,12 @@ impl TurnContextDiffFragment for RealtimeUpdateFragment {
         turn_context: &TurnContext,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
-        match (previous.realtime_active, turn_context.realtime_active) {
-            (Some(true), false) => Some(Self {
-                text: developer_realtime_end_text("inactive"),
-            }),
-            (Some(false), true) | (None, true) => Some(Self {
-                text: developer_realtime_start_text(),
-            }),
-            (Some(true), true) | (Some(false), false) => None,
-            (None, false) => params
-                .previous_turn_settings
-                .and_then(|settings| settings.realtime_active)
-                .filter(|realtime_active| *realtime_active)
-                .map(|_| Self {
-                    text: developer_realtime_end_text("inactive"),
-                }),
-        }
+        realtime_update_text(
+            previous.realtime_active,
+            turn_context.realtime_active,
+            params.previous_turn_settings,
+        )
+        .map(|text| Self { text })
     }
 }
 
@@ -250,21 +267,13 @@ impl TurnContextDiffFragment for ModelInstructionsUpdateFragment {
         turn_context: &TurnContext,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
-        let previous_turn_settings = params.previous_turn_settings?;
-        if previous_turn_settings.model == turn_context.model_info.slug {
-            return None;
-        }
-
-        let model_instructions = turn_context
-            .model_info
-            .get_model_instructions(turn_context.personality);
-        if model_instructions.is_empty() {
-            return None;
-        }
-
-        Some(Self {
-            text: developer_model_switch_text(model_instructions),
-        })
+        model_instructions_update_text(
+            params
+                .previous_turn_settings
+                .map(|settings| settings.model.as_str()),
+            turn_context,
+        )
+        .map(|text| Self { text })
     }
 
     fn diff_from_turn_context_item(
@@ -272,20 +281,8 @@ impl TurnContextDiffFragment for ModelInstructionsUpdateFragment {
         turn_context: &TurnContext,
         _params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
-        if previous.model == turn_context.model_info.slug {
-            return None;
-        }
-
-        let model_instructions = turn_context
-            .model_info
-            .get_model_instructions(turn_context.personality);
-        if model_instructions.is_empty() {
-            return None;
-        }
-
-        Some(Self {
-            text: developer_model_switch_text(model_instructions),
-        })
+        model_instructions_update_text(Some(previous.model.as_str()), turn_context)
+            .map(|text| Self { text })
     }
 }
 
@@ -359,19 +356,10 @@ pub(crate) fn build_model_instructions_update_item(
     previous_turn_settings: Option<&PreviousTurnSettings>,
     turn_context: &TurnContext,
 ) -> Option<String> {
-    let previous_turn_settings = previous_turn_settings?;
-    if previous_turn_settings.model == turn_context.model_info.slug {
-        return None;
-    }
-
-    let model_instructions = turn_context
-        .model_info
-        .get_model_instructions(turn_context.personality);
-    if model_instructions.is_empty() {
-        return None;
-    }
-
-    Some(developer_model_switch_text(model_instructions))
+    model_instructions_update_text(
+        previous_turn_settings.map(|settings| settings.model.as_str()),
+        turn_context,
+    )
 }
 
 pub(crate) fn build_realtime_update_item(
@@ -379,16 +367,9 @@ pub(crate) fn build_realtime_update_item(
     previous_turn_settings: Option<&PreviousTurnSettings>,
     turn_context: &TurnContext,
 ) -> Option<String> {
-    match (
+    realtime_update_text(
         previous.and_then(|item| item.realtime_active),
         turn_context.realtime_active,
-    ) {
-        (Some(true), false) => Some(developer_realtime_end_text("inactive")),
-        (Some(false), true) | (None, true) => Some(developer_realtime_start_text()),
-        (Some(true), true) | (Some(false), false) => None,
-        (None, false) => previous_turn_settings
-            .and_then(|settings| settings.realtime_active)
-            .filter(|realtime_active| *realtime_active)
-            .map(|_| developer_realtime_end_text("inactive")),
-    }
+        previous_turn_settings,
+    )
 }

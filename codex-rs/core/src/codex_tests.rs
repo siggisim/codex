@@ -10,6 +10,8 @@ use crate::config_loader::Sourced;
 use crate::exec::ExecToolCallOutput;
 use crate::function_tool::FunctionCallError;
 use crate::mcp_connection_manager::ToolInfo;
+use crate::model_visible_context::DeveloperTextFragment;
+use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::models_manager::model_info;
 use crate::shell::default_user_shell;
 use crate::tools::format_exec_output_str;
@@ -60,6 +62,7 @@ use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::models::developer_personality_spec_text;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::protocol::ConversationAudioParams;
 use codex_protocol::protocol::RealtimeAudioFrame;
@@ -4033,7 +4036,8 @@ async fn sample_rollout(
             .as_ref()
             .and_then(|m| m.get_personality_message(Some(p)).filter(|s| !s.is_empty()))
     {
-        let msg = DeveloperInstructions::personality_spec_message(personality_message).into();
+        let msg = DeveloperTextFragment::new(developer_personality_spec_text(personality_message))
+            .into_message();
         let insert_at = initial_context
             .iter()
             .position(|m| matches!(m, ResponseItem::Message { role, .. } if role == "developer"))
