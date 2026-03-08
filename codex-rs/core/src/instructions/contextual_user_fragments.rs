@@ -19,6 +19,10 @@ use crate::model_visible_context::AGENTS_MD_OPEN_TAG_PREFIX;
 use crate::model_visible_context::PLUGINS_FRAGMENT_MARKERS;
 use crate::model_visible_context::SKILL_FRAGMENT_MARKERS;
 
+// ---------------------------------------------------------------------------
+// AGENTS instructions fragment
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename = "user_instructions", rename_all = "snake_case")]
 pub(crate) struct AgentsMdInstructions {
@@ -69,6 +73,10 @@ impl TurnContextDiffFragment for AgentsMdInstructions {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Skills fragment
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename = "skill_instructions", rename_all = "snake_case")]
 pub(crate) struct SkillInstructions {
@@ -87,6 +95,10 @@ impl ModelVisibleContextFragment for SkillInstructions {
         ))
     }
 }
+
+// ---------------------------------------------------------------------------
+// Plugins fragment
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename = "plugin_instructions", rename_all = "snake_case")]
