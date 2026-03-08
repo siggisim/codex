@@ -23,6 +23,14 @@ use codex_protocol::models::developer_realtime_start_text;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::TurnContextItem;
 
+// ---------------------------------------------------------------------------
+// Settings-update fragments for the developer envelope
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Model instructions fragment
+// ---------------------------------------------------------------------------
+
 fn model_instructions_update_text(
     previous_model: Option<&str>,
     turn_context: &TurnContext,
@@ -41,24 +49,54 @@ fn model_instructions_update_text(
     Some(developer_model_switch_text(model_instructions))
 }
 
-fn realtime_update_text(
-    previous_realtime_active: Option<bool>,
-    current_realtime_active: bool,
-    previous_turn_settings: Option<&PreviousTurnSettings>,
-) -> Option<String> {
-    match (previous_realtime_active, current_realtime_active) {
-        (Some(true), false) => Some(developer_realtime_end_text("inactive")),
-        (Some(false), true) | (None, true) => Some(developer_realtime_start_text()),
-        (Some(true), true) | (Some(false), false) => None,
-        (None, false) => previous_turn_settings
-            .and_then(|settings| settings.realtime_active)
-            .filter(|realtime_active| *realtime_active)
-            .map(|_| developer_realtime_end_text("inactive")),
+struct ModelInstructionsUpdateFragment {
+    text: String,
+}
+
+impl ModelVisibleContextFragment for ModelInstructionsUpdateFragment {
+    type Role = DeveloperContextRole;
+
+    fn render_text(&self) -> String {
+        self.text.clone()
     }
 }
 
+impl TurnContextDiffFragment for ModelInstructionsUpdateFragment {
+    fn from_turn_context(
+        turn_context: &TurnContext,
+        params: &TurnContextDiffParams<'_>,
+    ) -> Option<Self> {
+        model_instructions_update_text(
+            params
+                .previous_turn_settings
+                .map(|settings| settings.model.as_str()),
+            turn_context,
+        )
+        .map(|text| Self { text })
+    }
+
+    fn diff_from_turn_context_item(
+        previous: &TurnContextItem,
+        turn_context: &TurnContext,
+        _params: &TurnContextDiffParams<'_>,
+    ) -> Option<Self> {
+        model_instructions_update_text(Some(previous.model.as_str()), turn_context)
+            .map(|text| Self { text })
+    }
+}
+
+pub(crate) fn build_model_instructions_update_item(
+    previous_turn_settings: Option<&PreviousTurnSettings>,
+    turn_context: &TurnContext,
+) -> Option<String> {
+    model_instructions_update_text(
+        previous_turn_settings.map(|settings| settings.model.as_str()),
+        turn_context,
+    )
+}
+
 // ---------------------------------------------------------------------------
-// Settings-update fragments for the developer envelope
+// Permissions fragment
 // ---------------------------------------------------------------------------
 
 struct PermissionsUpdateFragment {
@@ -98,6 +136,10 @@ impl TurnContextDiffFragment for PermissionsUpdateFragment {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Custom developer instructions fragment
+// ---------------------------------------------------------------------------
+
 struct CustomDeveloperInstructionsUpdateFragment {
     text: String,
 }
@@ -127,6 +169,10 @@ impl TurnContextDiffFragment for CustomDeveloperInstructionsUpdateFragment {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Collaboration mode fragment
+// ---------------------------------------------------------------------------
+
 struct CollaborationModeUpdateFragment {
     text: String,
 }
@@ -154,6 +200,26 @@ impl TurnContextDiffFragment for CollaborationModeUpdateFragment {
         } else {
             None
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Realtime fragment
+// ---------------------------------------------------------------------------
+
+fn realtime_update_text(
+    previous_realtime_active: Option<bool>,
+    current_realtime_active: bool,
+    previous_turn_settings: Option<&PreviousTurnSettings>,
+) -> Option<String> {
+    match (previous_realtime_active, current_realtime_active) {
+        (Some(true), false) => Some(developer_realtime_end_text("inactive")),
+        (Some(false), true) | (None, true) => Some(developer_realtime_start_text()),
+        (Some(true), true) | (Some(false), false) => None,
+        (None, false) => previous_turn_settings
+            .and_then(|settings| settings.realtime_active)
+            .filter(|realtime_active| *realtime_active)
+            .map(|_| developer_realtime_end_text("inactive")),
     }
 }
 
@@ -194,6 +260,33 @@ impl TurnContextDiffFragment for RealtimeUpdateFragment {
         )
         .map(|text| Self { text })
     }
+}
+
+pub(crate) fn build_realtime_update_item(
+    previous: Option<&TurnContextItem>,
+    previous_turn_settings: Option<&PreviousTurnSettings>,
+    turn_context: &TurnContext,
+) -> Option<String> {
+    realtime_update_text(
+        previous.and_then(|item| item.realtime_active),
+        turn_context.realtime_active,
+        previous_turn_settings,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Personality fragment
+// ---------------------------------------------------------------------------
+
+pub(crate) fn personality_message_for(
+    model_info: &ModelInfo,
+    personality: Personality,
+) -> Option<String> {
+    model_info
+        .model_messages
+        .as_ref()
+        .and_then(|spec| spec.get_personality_message(Some(personality)))
+        .filter(|message| !message.is_empty())
 }
 
 struct PersonalityUpdateFragment {
@@ -250,42 +343,6 @@ impl TurnContextDiffFragment for PersonalityUpdateFragment {
     }
 }
 
-struct ModelInstructionsUpdateFragment {
-    text: String,
-}
-
-impl ModelVisibleContextFragment for ModelInstructionsUpdateFragment {
-    type Role = DeveloperContextRole;
-
-    fn render_text(&self) -> String {
-        self.text.clone()
-    }
-}
-
-impl TurnContextDiffFragment for ModelInstructionsUpdateFragment {
-    fn from_turn_context(
-        turn_context: &TurnContext,
-        params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        model_instructions_update_text(
-            params
-                .previous_turn_settings
-                .map(|settings| settings.model.as_str()),
-            turn_context,
-        )
-        .map(|text| Self { text })
-    }
-
-    fn diff_from_turn_context_item(
-        previous: &TurnContextItem,
-        turn_context: &TurnContext,
-        _params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        model_instructions_update_text(Some(previous.model.as_str()), turn_context)
-            .map(|text| Self { text })
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Fragment list assembly
 // ---------------------------------------------------------------------------
@@ -335,41 +392,4 @@ pub(super) fn build_developer_update_texts(
     .into_iter()
     .flatten()
     .collect()
-}
-
-// ---------------------------------------------------------------------------
-// Shared helper exports used outside this module
-// ---------------------------------------------------------------------------
-
-pub(crate) fn personality_message_for(
-    model_info: &ModelInfo,
-    personality: Personality,
-) -> Option<String> {
-    model_info
-        .model_messages
-        .as_ref()
-        .and_then(|spec| spec.get_personality_message(Some(personality)))
-        .filter(|message| !message.is_empty())
-}
-
-pub(crate) fn build_model_instructions_update_item(
-    previous_turn_settings: Option<&PreviousTurnSettings>,
-    turn_context: &TurnContext,
-) -> Option<String> {
-    model_instructions_update_text(
-        previous_turn_settings.map(|settings| settings.model.as_str()),
-        turn_context,
-    )
-}
-
-pub(crate) fn build_realtime_update_item(
-    previous: Option<&TurnContextItem>,
-    previous_turn_settings: Option<&PreviousTurnSettings>,
-    turn_context: &TurnContext,
-) -> Option<String> {
-    realtime_update_text(
-        previous.and_then(|item| item.realtime_active),
-        turn_context.realtime_active,
-        previous_turn_settings,
-    )
 }
