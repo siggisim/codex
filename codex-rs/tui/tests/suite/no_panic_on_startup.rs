@@ -89,7 +89,7 @@ async fn run_codex_cli(
         loop {
             select! {
                 result = output_rx.recv() => match result {
-                    Ok(chunk) => {
+                    Some(chunk) => {
                         // The TUI asks for the cursor position via ESC[6n.
                         // Respond with a valid position to unblock startup.
                         if chunk.windows(4).any(|window| window == b"\x1b[6n") {
@@ -97,8 +97,7 @@ async fn run_codex_cli(
                         }
                         output.extend_from_slice(&chunk);
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break exit_rx.await,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    None => break exit_rx.await,
                 },
                 result = &mut exit_rx => break result,
             }

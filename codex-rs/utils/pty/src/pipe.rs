@@ -13,7 +13,6 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::process::Command;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -76,7 +75,7 @@ fn kill_process(pid: u32) -> io::Result<()> {
 
 async fn read_output_stream<R>(
     mut reader: R,
-    merged_output_tx: broadcast::Sender<Vec<u8>>,
+    merged_output_tx: mpsc::Sender<Vec<u8>>,
     stream_output_tx: mpsc::Sender<Vec<u8>>,
 ) where
     R: AsyncRead + Unpin,
@@ -87,7 +86,7 @@ async fn read_output_stream<R>(
             Ok(0) => break,
             Ok(n) => {
                 let chunk = buf[..n].to_vec();
-                let _ = merged_output_tx.send(chunk.clone());
+                let _ = merged_output_tx.send(chunk.clone()).await;
                 let _ = stream_output_tx.send(chunk).await;
             }
             Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
@@ -163,8 +162,7 @@ async fn spawn_process_with_stdin_mode(
     let stderr = child.stderr.take();
 
     let (writer_tx, mut writer_rx) = mpsc::channel::<Vec<u8>>(128);
-    let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
-    let output_rx = output_tx.subscribe();
+    let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>(256);
     let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>(128);
     let (stderr_tx, stderr_rx) = mpsc::channel::<Vec<u8>>(128);
     let writer_handle = if let Some(stdin) = stdin {

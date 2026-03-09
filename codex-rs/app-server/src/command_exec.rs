@@ -31,7 +31,6 @@ use codex_utils_pty::SpawnedProcess;
 use codex_utils_pty::SpawnedProcessSplit;
 use codex_utils_pty::TerminalSize;
 use tokio::sync::Mutex;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
@@ -118,17 +117,12 @@ enum SpawnedCommand {
 struct SpawnProcessOutputParams {
     connection_id: ConnectionId,
     process_id: Option<String>,
-    output_rx: CommandOutputReceiver,
+    output_rx: mpsc::Receiver<Vec<u8>>,
     stdio_timeout_rx: watch::Receiver<bool>,
     outgoing: Arc<OutgoingMessageSender>,
     stream: CommandExecOutputStream,
     stream_output: bool,
     output_bytes_cap: Option<usize>,
-}
-
-enum CommandOutputReceiver {
-    Mpsc(mpsc::Receiver<Vec<u8>>),
-    Broadcast(broadcast::Receiver<Vec<u8>>),
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -490,7 +484,7 @@ async fn run_command(params: RunCommandParams) {
             let stdout_handle = spawn_process_output(SpawnProcessOutputParams {
                 connection_id: request_id.connection_id,
                 process_id: process_id.clone(),
-                output_rx: CommandOutputReceiver::Broadcast(output_rx),
+                output_rx,
                 stdio_timeout_rx: stdio_timeout_rx.clone(),
                 outgoing: Arc::clone(&outgoing),
                 stream: CommandExecOutputStream::Stdout,
@@ -510,7 +504,7 @@ async fn run_command(params: RunCommandParams) {
             let stdout_handle = spawn_process_output(SpawnProcessOutputParams {
                 connection_id: request_id.connection_id,
                 process_id: process_id.clone(),
-                output_rx: CommandOutputReceiver::Mpsc(stdout_rx),
+                output_rx: stdout_rx,
                 stdio_timeout_rx: stdio_timeout_rx.clone(),
                 outgoing: Arc::clone(&outgoing),
                 stream: CommandExecOutputStream::Stdout,
@@ -520,7 +514,7 @@ async fn run_command(params: RunCommandParams) {
             let stderr_handle = spawn_process_output(SpawnProcessOutputParams {
                 connection_id: request_id.connection_id,
                 process_id,
-                output_rx: CommandOutputReceiver::Mpsc(stderr_rx),
+                output_rx: stderr_rx,
                 stdio_timeout_rx,
                 outgoing: Arc::clone(&outgoing),
                 stream: CommandExecOutputStream::Stderr,
@@ -603,7 +597,7 @@ fn spawn_process_output(params: SpawnProcessOutputParams) -> tokio::task::JoinHa
     let SpawnProcessOutputParams {
         connection_id,
         process_id,
-        output_rx,
+        mut output_rx,
         mut stdio_timeout_rx,
         outgoing,
         stream,
@@ -611,23 +605,11 @@ fn spawn_process_output(params: SpawnProcessOutputParams) -> tokio::task::JoinHa
         output_bytes_cap,
     } = params;
     tokio::spawn(async move {
-        let mut output_rx = output_rx;
         let mut buffer: Vec<u8> = Vec::new();
         let mut observed_num_bytes = 0usize;
         loop {
             let chunk = tokio::select! {
-                chunk = async {
-                    match &mut output_rx {
-                        CommandOutputReceiver::Mpsc(output_rx) => output_rx.recv().await,
-                        CommandOutputReceiver::Broadcast(output_rx) => loop {
-                            match output_rx.recv().await {
-                                Ok(chunk) => break Some(chunk),
-                                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                                Err(broadcast::error::RecvError::Closed) => break None,
-                            }
-                        },
-                    }
-                } => match chunk {
+                chunk = output_rx.recv() => match chunk {
                     Some(chunk) => chunk,
                     None => break,
                 },

@@ -150,14 +150,13 @@ trust_level = "trusted"
         loop {
             select! {
                 result = output_rx.recv() => match result {
-                    Ok(chunk) => {
+                    Some(chunk) => {
                         if chunk.windows(4).any(|window| window == b"\x1b[6n") {
                             let _ = writer_tx.send(b"\x1b[1;1R".to_vec()).await;
                         }
                         output.extend_from_slice(&chunk);
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break exit_rx.await,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    None => break exit_rx.await,
                 },
                 result = &mut exit_rx => break result,
             }

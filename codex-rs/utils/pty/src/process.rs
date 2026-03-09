@@ -8,7 +8,6 @@ use anyhow::anyhow;
 use portable_pty::MasterPty;
 use portable_pty::PtySize;
 use portable_pty::SlavePty;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::AbortHandle;
@@ -194,7 +193,7 @@ impl Drop for ProcessHandle {
 #[derive(Debug)]
 pub struct SpawnedProcess {
     pub session: ProcessHandle,
-    pub output_rx: broadcast::Receiver<Vec<u8>>,
+    pub output_rx: mpsc::Receiver<Vec<u8>>,
     pub exit_rx: oneshot::Receiver<i32>,
 }
 
@@ -202,7 +201,7 @@ pub struct SpawnedProcess {
 #[derive(Debug)]
 pub struct SpawnedProcessSplit {
     pub session: ProcessHandle,
-    pub output_rx: broadcast::Receiver<Vec<u8>>,
+    pub output_rx: mpsc::Receiver<Vec<u8>>,
     pub stdout_rx: mpsc::Receiver<Vec<u8>>,
     pub stderr_rx: mpsc::Receiver<Vec<u8>>,
     pub exit_rx: oneshot::Receiver<i32>,

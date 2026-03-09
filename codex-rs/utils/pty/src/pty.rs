@@ -10,7 +10,6 @@ use anyhow::Result;
 #[cfg(not(windows))]
 use portable_pty::native_pty_system;
 use portable_pty::CommandBuilder;
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -108,8 +107,7 @@ pub async fn spawn_process(
     let killer = child.clone_killer();
 
     let (writer_tx, mut writer_rx) = mpsc::channel::<Vec<u8>>(128);
-    let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
-    let output_rx = output_tx.subscribe();
+    let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>(256);
     let mut reader = pair.master.try_clone_reader()?;
     let reader_handle: JoinHandle<()> = tokio::task::spawn_blocking(move || {
         let mut buf = [0u8; 8_192];
@@ -117,7 +115,9 @@ pub async fn spawn_process(
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let _ = output_tx.send(buf[..n].to_vec());
+                    if output_tx.blocking_send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
                 }
                 Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
