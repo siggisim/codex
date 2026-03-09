@@ -767,7 +767,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "guardian_approval",
         stage: Stage::Experimental {
             name: "Smart Approvals",
-            menu_description: "Dispatch `on-request` approval prompts (for e.g. sandbox escapes or blocked network access) to a carefully-prompted security reviewer subagent rather than blocking the agent on your input.",
+            menu_description: "When Codex needs approval for higher-risk actions (e.g. sandbox escapes or blocked network access), dispatch those approval requests to a carefully-prompted security reviewer subagent instead of blocking on your input.",
             announcement: "",
         },
         default_enabled: false,
@@ -963,7 +963,7 @@ mod tests {
         assert_eq!(
             stage.experimental_menu_description().map(str::to_owned),
             Some(
-                "Dispatch `on-request` approval prompts (for e.g. sandbox escapes or blocked network access) to a carefully-prompted security reviewer subagent rather than blocking the agent on your input.".to_string()
+                "When Codex needs approval for higher-risk actions (e.g. sandbox escapes or blocked network access), dispatch those approval requests to a carefully-prompted security reviewer subagent instead of blocking on your input.".to_string()
             )
         );
         assert_eq!(stage.experimental_announcement(), None);
