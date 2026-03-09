@@ -479,8 +479,7 @@ const APPROVAL_POLICY_ON_REQUEST_RULE: &str =
     include_str!("prompts/permissions/approval_policy/on_request_rule.md");
 const APPROVAL_POLICY_ON_REQUEST_RULE_REQUEST_PERMISSION: &str =
     include_str!("prompts/permissions/approval_policy/on_request_rule_request_permission.md");
-const GUARDIAN_APPROVAL_FEATURE: &str =
-    include_str!("prompts/permissions/approval_policy/guardian.md");
+const GUARDIAN_APPROVAL_FEATURE: &str = "";
 
 const SANDBOX_MODE_DANGER_FULL_ACCESS: &str =
     include_str!("prompts/permissions/sandbox_mode/danger_full_access.md");
@@ -602,7 +601,7 @@ pub fn developer_permissions_with_network_text(
         AskForApproval::OnFailure => APPROVAL_POLICY_ON_FAILURE.to_string(),
         AskForApproval::OnRequest => {
             let mut instructions = on_request_instructions();
-            if guardian_approval_enabled {
+            if guardian_approval_enabled && !GUARDIAN_APPROVAL_FEATURE.is_empty() {
                 instructions.push_str("\n\n");
                 instructions.push_str(GUARDIAN_APPROVAL_FEATURE);
             }
@@ -903,6 +902,7 @@ pub struct LocalShellExecAction {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[schemars(rename = "ResponsesApiWebSearchAction")]
 pub enum WebSearchAction {
     Search {
         #[serde(default, skip_serializing_if = "Option::is_none")]

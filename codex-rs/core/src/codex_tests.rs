@@ -3944,7 +3944,7 @@ async fn abort_review_task_emits_exited_then_aborted_and_records_history() {
                 let ContentItem::InputText { text } = content_item else {
                     return false;
                 };
-                text.contains(crate::contextual_user_message::TURN_ABORTED_OPEN_TAG)
+                text.contains(crate::model_visible_context::TURN_ABORTED_OPEN_TAG)
             })
         }),
         "expected a model-visible turn aborted marker in history after interrupt"

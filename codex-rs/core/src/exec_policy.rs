@@ -540,7 +540,7 @@ pub fn render_decision_for_unmatched_command(
                     // In restricted sandboxes (ReadOnly/WorkspaceWrite), do not prompt for
                     // non‑escalated, non‑dangerous commands — let the sandbox enforce
                     // restrictions (e.g., block network/write) without a user prompt.
-                    if sandbox_permissions.requests_sandbox_override() {
+                    if sandbox_permissions.requires_escalated_permissions() {
                         Decision::Prompt
                     } else {
                         Decision::Allow
@@ -555,7 +555,7 @@ pub fn render_decision_for_unmatched_command(
                 Decision::Allow
             }
             SandboxPolicy::ReadOnly { .. } | SandboxPolicy::WorkspaceWrite { .. } => {
-                if sandbox_permissions.requests_sandbox_override() {
+                if sandbox_permissions.requires_escalated_permissions() {
                     Decision::Prompt
                 } else {
                     Decision::Allow

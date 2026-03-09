@@ -21,6 +21,7 @@ use core_test_support::stdio_server_bin;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_with_timeout;
+use dunce::canonicalize as normalize_path;
 use tempfile::TempDir;
 use wiremock::MockServer;
 

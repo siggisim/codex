@@ -357,7 +357,7 @@ impl ShellHandler {
         // continue through the normal exec approval flow for the command.
         if effective_additional_permissions
             .sandbox_permissions
-            .requests_sandbox_override()
+            .requires_escalated_permissions()
             && !effective_additional_permissions.permissions_preapproved
             && !matches!(
                 turn.approval_policy.value(),

@@ -194,12 +194,13 @@ pub(super) async fn apply_granted_turn_permissions(
         _ => false,
     };
 
-    let sandbox_permissions =
-        if effective_permissions.is_some() && !sandbox_permissions.uses_additional_permissions() {
-            SandboxPermissions::WithAdditionalPermissions
-        } else {
-            sandbox_permissions
-        };
+    let sandbox_permissions = if effective_permissions.is_some()
+        && !sandbox_permissions.requires_additional_permissions()
+    {
+        SandboxPermissions::WithAdditionalPermissions
+    } else {
+        sandbox_permissions
+    };
 
     EffectiveAdditionalPermissions {
         sandbox_permissions,
