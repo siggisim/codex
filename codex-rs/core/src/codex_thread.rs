@@ -12,8 +12,6 @@ use crate::protocol::Op;
 use crate::protocol::Submission;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ServiceTier;
-use codex_protocol::models::ContentItem;
-use codex_protocol::models::MessageRole;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -25,6 +23,11 @@ use codex_protocol::user_input::UserInput;
 use std::path::PathBuf;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
+
+#[cfg(test)]
+use codex_protocol::models::ContentItem;
+#[cfg(test)]
+use codex_protocol::models::MessageRole;
 
 use crate::state_db::StateDbHandle;
 
@@ -115,6 +118,7 @@ impl CodexThread {
             .await;
     }
 
+    #[cfg(test)]
     pub(crate) async fn inject_message_without_turn(&self, role: MessageRole, message: String) {
         self.inject_response_input_item_without_turn(ResponseInputItem::Message {
             role: role.to_string(),
