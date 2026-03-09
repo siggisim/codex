@@ -5,6 +5,8 @@ use std::fmt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering as AtomicOrdering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -76,6 +78,7 @@ const JS_REPL_POLL_MIN_MS: u64 = 50;
 const JS_REPL_POLL_MAX_MS: u64 = crate::unified_exec::DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS;
 const JS_REPL_POLL_DEFAULT_MS: u64 = crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 const JS_REPL_POLL_MAX_SESSIONS: usize = 16;
+const JS_REPL_POLL_MAX_COMPLETED_EXECS: usize = 64;
 const JS_REPL_POLL_ALL_LOGS_MAX_BYTES: usize = crate::unified_exec::UNIFIED_EXEC_OUTPUT_MAX_BYTES;
 const JS_REPL_POLL_LOG_QUEUE_MAX_BYTES: usize = 64 * 1024;
 const JS_REPL_OUTPUT_DELTA_MAX_BYTES: usize = 8192;
@@ -90,6 +93,7 @@ pub(crate) const JS_REPL_TIMEOUT_ERROR_MESSAGE: &str =
 const JS_REPL_CANCEL_ERROR_MESSAGE: &str = "js_repl execution canceled";
 pub(crate) const JS_REPL_POLL_TIMEOUT_ARG_ERROR_MESSAGE: &str =
     "js_repl timeout_ms is not supported when poll=true; use js_repl_poll yield_time_ms";
+static NEXT_COMPLETED_EXEC_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// Per-task js_repl handle stored on the turn context.
 pub(crate) struct JsReplHandle {
@@ -255,6 +259,7 @@ struct ExecBuffer {
     done: bool,
     host_terminating: bool,
     terminal_kind: Option<ExecTerminalKind>,
+    completed_sequence: Option<u64>,
     started_at: Instant,
     notify: Arc<Notify>,
     emitted_deltas: usize,
@@ -284,6 +289,7 @@ impl ExecBuffer {
             done: false,
             host_terminating: false,
             terminal_kind: None,
+            completed_sequence: None,
             started_at: Instant::now(),
             notify: Arc::new(Notify::new()),
             emitted_deltas: 0,
@@ -1074,9 +1080,10 @@ impl JsReplManager {
                 entry.error = None;
             }
             entry.terminal_kind = Some(terminal_kind);
+            entry.completed_sequence =
+                Some(NEXT_COMPLETED_EXEC_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed));
             entry.notify.notify_waiters();
-
-            Some(ExecCompletionEvent {
+            let event = ExecCompletionEvent {
                 session: Arc::clone(&entry.session),
                 turn: Arc::clone(&entry.turn),
                 event_call_id: entry.event_call_id.clone(),
@@ -1084,7 +1091,30 @@ impl JsReplManager {
                 error: entry.error.clone(),
                 duration: entry.started_at.elapsed(),
                 timed_out: false,
-            })
+            };
+            let completed_exec_count = store.values().filter(|entry| entry.done).count();
+            let excess_completed_execs =
+                completed_exec_count.saturating_sub(JS_REPL_POLL_MAX_COMPLETED_EXECS);
+            if excess_completed_execs > 0 {
+                let mut completed_execs = store
+                    .iter()
+                    .filter_map(|(exec_id, entry)| {
+                        entry
+                            .done
+                            .then_some((exec_id.clone(), entry.completed_sequence.unwrap_or(0)))
+                    })
+                    .collect::<Vec<_>>();
+                completed_execs.sort_by_key(|(_, completed_sequence)| *completed_sequence);
+                for exec_id in completed_execs
+                    .into_iter()
+                    .take(excess_completed_execs)
+                    .map(|(exec_id, _)| exec_id)
+                {
+                    store.remove(&exec_id);
+                }
+            }
+
+            Some(event)
         };
 
         if let Some(event) = event {
@@ -3293,6 +3323,72 @@ mod tests {
         assert_eq!(entry.terminal_kind, Some(ExecTerminalKind::Cancelled));
         assert_eq!(entry.error.as_deref(), Some(JS_REPL_CANCEL_ERROR_MESSAGE));
         assert!(!entry.host_terminating);
+    }
+
+    #[tokio::test]
+    async fn complete_exec_in_store_caps_completed_exec_residency() {
+        let (session, turn) = make_session_and_context().await;
+        let session = Arc::new(session);
+        let turn = Arc::new(turn);
+        let exec_store = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
+        let active_exec_id = "active-exec";
+        exec_store.lock().await.insert(
+            active_exec_id.to_string(),
+            ExecBuffer::new(
+                "call-active".to_string(),
+                Some("session-1".to_string()),
+                Arc::clone(&session),
+                Arc::clone(&turn),
+            ),
+        );
+
+        for idx in 0..=JS_REPL_POLL_MAX_COMPLETED_EXECS {
+            let exec_id = format!("exec-{idx}");
+            exec_store.lock().await.insert(
+                exec_id.clone(),
+                ExecBuffer::new(
+                    format!("call-{idx}"),
+                    Some("session-1".to_string()),
+                    Arc::clone(&session),
+                    Arc::clone(&turn),
+                ),
+            );
+
+            let completed = JsReplManager::complete_exec_in_store(
+                &exec_store,
+                &exec_id,
+                ExecTerminalKind::Success,
+                Some(format!("done-{idx}")),
+                Some(Vec::new()),
+                None,
+            )
+            .await;
+            assert!(completed);
+        }
+
+        let store = exec_store.lock().await;
+        assert!(store.contains_key(active_exec_id));
+        assert!(
+            !store
+                .get(active_exec_id)
+                .expect("active exec should still exist")
+                .done
+        );
+        assert_eq!(
+            store.values().filter(|entry| entry.done).count(),
+            JS_REPL_POLL_MAX_COMPLETED_EXECS
+        );
+        assert!(
+            !store.contains_key("exec-0"),
+            "oldest completed exec should be pruned"
+        );
+        for idx in 1..=JS_REPL_POLL_MAX_COMPLETED_EXECS {
+            assert!(
+                store.contains_key(&format!("exec-{idx}")),
+                "newer completed exec should still be retained"
+            );
+        }
     }
 
     #[tokio::test]
