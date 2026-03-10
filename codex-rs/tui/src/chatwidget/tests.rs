@@ -2083,7 +2083,6 @@ fn lines_to_single_string(lines: &[ratatui::text::Line<'static>]) -> String {
     s
 }
 
-<<<<<<< HEAD
 fn status_line_text(chat: &ChatWidget) -> Option<String> {
     chat.status_line_text()
 }
