@@ -718,7 +718,10 @@ pub(crate) struct ChatWidget {
     // Shared latch so we only warn once about invalid terminal-title item IDs.
     terminal_title_invalid_items_warned: Arc<AtomicBool>,
     // Last terminal title emitted, to avoid writing duplicate OSC updates.
-    last_terminal_title: Option<String>,
+    //
+    // App carries this cache across ChatWidget replacement so the next widget can
+    // clear a stale title when its own configuration renders no title content.
+    pub(crate) last_terminal_title: Option<String>,
     // Original terminal-title config captured when opening the setup UI so live preview can be
     // rolled back on cancel.
     terminal_title_setup_original_items: Option<Option<Vec<String>>>,

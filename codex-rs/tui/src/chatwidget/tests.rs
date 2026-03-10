@@ -9809,12 +9809,12 @@ async fn terminal_title_status_uses_plain_labels_for_transient_states_when_anima
 }
 
 #[tokio::test]
-async fn default_terminal_title_items_are_status_then_thread() {
+async fn default_terminal_title_items_are_project_then_status() {
     let (chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
 
     assert_eq!(
         chat.configured_terminal_title_items(),
-        vec!["status".to_string(), "thread".to_string()]
+        vec!["project".to_string(), "status".to_string()]
     );
 }
 
@@ -9822,10 +9822,9 @@ async fn default_terminal_title_items_are_status_then_thread() {
 async fn default_terminal_title_refreshes_when_status_changes() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.config.animations = false;
-    chat.thread_name = Some("Investigate flaky test".to_string());
 
     chat.config.tui_terminal_title = None;
-    chat.last_terminal_title = Some("Ready | Investigate flaky test".to_string());
+    chat.last_terminal_title = Some("codex | Ready".to_string());
     chat.bottom_pane.set_task_running(true);
     chat.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
 
@@ -9833,7 +9832,7 @@ async fn default_terminal_title_refreshes_when_status_changes() {
 
     assert_eq!(
         chat.last_terminal_title,
-        Some("Thinking | Investigate flaky test".to_string())
+        Some("codex | Thinking".to_string())
     );
 }
 
