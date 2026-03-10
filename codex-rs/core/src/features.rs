@@ -764,7 +764,7 @@ pub const FEATURES: &[FeatureSpec] = &[
     },
     FeatureSpec {
         id: Feature::GuardianApproval,
-        key: "guardian_approval",
+        key: "smart_approvals",
         stage: Stage::Experimental {
             name: "Smart Approvals",
             menu_description: "When Codex needs approval for higher-risk actions (e.g. sandbox escapes or blocked network access), dispatch those approval requests to a carefully-prompted security reviewer subagent instead of blocking on your input.",
@@ -954,7 +954,7 @@ mod tests {
     }
 
     #[test]
-    fn guardian_approval_is_experimental_and_user_toggleable() {
+    fn smart_approvals_is_experimental_and_user_toggleable() {
         let spec = Feature::GuardianApproval.info();
         let stage = spec.stage;
 
@@ -968,6 +968,23 @@ mod tests {
         );
         assert_eq!(stage.experimental_announcement(), None);
         assert_eq!(Feature::GuardianApproval.default_enabled(), false);
+    }
+
+    #[test]
+    fn guardian_approval_alias_maps_to_smart_approvals() {
+        assert_eq!(
+            feature_for_key("guardian_approval"),
+            Some(Feature::GuardianApproval)
+        );
+        assert_eq!(
+            feature_for_key("smart_approvals"),
+            Some(Feature::GuardianApproval)
+        );
+        assert_eq!(canonical_feature_for_key("guardian_approval"), None);
+        assert_eq!(
+            canonical_feature_for_key("smart_approvals"),
+            Some(Feature::GuardianApproval)
+        );
     }
 
     #[test]
