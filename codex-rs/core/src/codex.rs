@@ -3370,7 +3370,6 @@ impl Session {
         );
         let turn_state_fragments =
             crate::context_manager::updates::build_turn_state_envelope_fragments(
-                crate::context_manager::updates::FragmentBuildPass::InitialContext,
                 reference_context_item.as_ref(),
                 turn_context,
                 &diff_context,

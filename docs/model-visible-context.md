@@ -27,7 +27,7 @@ When adding new model-visible context:
 3. Set the fragment `type Role` to the correct developer or contextual-user role.
 4. If it is a contextual-user fragment, wrap content with shared marker helpers/constants from `model_visible_context`.
 5. If the fragment is derived from durable/current turn state and should be diffed/reinjected after history mutations, also implement `TurnContextDiffFragment`.
-6. Register the fragment type in the turn-state fragment registries (`...FragmentRegistration::of::<YourType>()` in `context_manager/updates/developer_update_fragments.rs` or `context_manager/updates/contextual_user_update_fragments.rs`). Both registries use the same `TurnStateFragmentRegistration` adapter trait.
+6. Register the fragment type in the single ordered turn-state registry in `context_manager/updates.rs` (`REGISTERED_TURN_STATE_FRAGMENT_BUILDERS`) using `build_registered_turn_state_fragment::<YourType>`.
 7. Push the resulting fragments through the shared envelope builders.
 
 Do not hand-build developer or contextual-user model-visible `ResponseItem`s in new code.
@@ -66,7 +66,11 @@ Use `<environment_context>` only for environment facts derived from turn/session
 
 If a fragment is derived from durable turn/session state and should be updated/reinjected by diff after history mutation, keep its extraction, diffing, and rendering logic together by implementing `TurnContextDiffFragment`.
 
-`TurnContextDiffFragment` receives `TurnContextDiffParams`, which carries shared runtime inputs used during diffing (for example shell, previous-turn bridge state, exec-policy rendering context, and feature gating flags).
+`TurnContextDiffFragment` exposes one `build(...)` method that receives:
+
+- current `TurnContext`
+- optional `reference_context_item` (the turn context state already represented in model-visible history, if available)
+- `TurnContextDiffParams` for shared runtime inputs (for example shell, previous-turn bridge state, exec-policy rendering context, and feature gating flags)
 
 This is envelope-agnostic: both contextual-user state fragments and developer state-diff fragments use the same trait.
 
@@ -74,8 +78,8 @@ If a fragment is runtime-event/session-prefix only (for example subagent complet
 
 That trait is the blessed path for fragments that need to:
 
-- build full initial context from the current turn state
-- compute settings-update diffs from persisted previous state to current turn state
+- build full initial context when no reference context item is available
+- compute turn diffs when a reference context item is available
 
 `EnvironmentContext` is the canonical example. Future turn-backed contextual fragments should follow the same pattern instead of introducing one-off extraction or diff helpers.
 

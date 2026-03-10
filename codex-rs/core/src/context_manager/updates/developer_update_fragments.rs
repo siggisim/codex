@@ -1,17 +1,13 @@
-//! Developer-envelope model-visible fragments and helper functions used by
-//! settings-update assembly (`build_settings_update_items`) and initial-context
+//! Developer-envelope model-visible fragments used by turn-state context
 //! assembly.
 //!
 //! This module owns the turn-context diffing logic for developer-role context
 //! updates (permissions, collaboration mode, realtime, personality, and model
 //! switch guidance).
 
-use super::FragmentBuildPass;
-use super::TurnStateFragmentRegistration;
 use crate::codex::TurnContext;
 use crate::features::Feature;
 use crate::model_visible_context::DeveloperContextRole;
-use crate::model_visible_context::DeveloperTextFragment;
 use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
@@ -48,7 +44,7 @@ fn model_instructions_update_text(
     Some(developer_model_switch_text(model_instructions))
 }
 
-pub(crate) struct ModelInstructionsUpdateFragment {
+pub(super) struct ModelInstructionsUpdateFragment {
     text: String,
 }
 
@@ -61,33 +57,23 @@ impl ModelVisibleContextFragment for ModelInstructionsUpdateFragment {
 }
 
 impl TurnContextDiffFragment for ModelInstructionsUpdateFragment {
-    fn from_turn_context(
+    fn build(
         turn_context: &TurnContext,
-        params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        model_instructions_update_text(
-            params
-                .previous_turn_settings
-                .map(|settings| settings.model.as_str()),
-            turn_context,
-        )
-        .map(|text| Self { text })
-    }
-
-    fn diff_from_turn_context_item(
-        previous: &TurnContextItem,
-        turn_context: &TurnContext,
+        _reference_context_item: Option<&TurnContextItem>,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
         let previous_model = params
             .previous_turn_settings
-            .map(|settings| settings.model.as_str())
-            .or(Some(previous.model.as_str()));
+            .map(|settings| settings.model.as_str());
         model_instructions_update_text(previous_model, turn_context).map(|text| Self { text })
     }
 }
 
-struct PermissionsUpdateFragment {
+// ---------------------------------------------------------------------------
+// Permissions fragment
+// ---------------------------------------------------------------------------
+
+pub(super) struct PermissionsUpdateFragment {
     text: String,
 }
 
@@ -100,30 +86,15 @@ impl ModelVisibleContextFragment for PermissionsUpdateFragment {
 }
 
 impl TurnContextDiffFragment for PermissionsUpdateFragment {
-    fn from_turn_context(
+    fn build(
         turn_context: &TurnContext,
+        reference_context_item: Option<&TurnContextItem>,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
-        Some(Self {
-            text: developer_permissions_text(
-                turn_context.sandbox_policy.get(),
-                turn_context.approval_policy.value(),
-                turn_context.features.enabled(Feature::GuardianApproval),
-                params.exec_policy,
-                &turn_context.cwd,
-                turn_context.features.enabled(Feature::RequestPermissions),
-            ),
-        })
-    }
-
-    fn diff_from_turn_context_item(
-        previous: &TurnContextItem,
-        turn_context: &TurnContext,
-        params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        if previous.sandbox_policy == *turn_context.sandbox_policy.get()
-            && previous.approval_policy == turn_context.approval_policy.value()
-        {
+        if reference_context_item.is_some_and(|previous| {
+            previous.sandbox_policy == *turn_context.sandbox_policy.get()
+                && previous.approval_policy == turn_context.approval_policy.value()
+        }) {
             return None;
         }
 
@@ -144,7 +115,7 @@ impl TurnContextDiffFragment for PermissionsUpdateFragment {
 // Custom developer instructions fragment
 // ---------------------------------------------------------------------------
 
-struct CustomDeveloperInstructionsUpdateFragment {
+pub(super) struct CustomDeveloperInstructionsUpdateFragment {
     text: String,
 }
 
@@ -157,29 +128,20 @@ impl ModelVisibleContextFragment for CustomDeveloperInstructionsUpdateFragment {
 }
 
 impl TurnContextDiffFragment for CustomDeveloperInstructionsUpdateFragment {
-    fn from_turn_context(
+    fn build(
         turn_context: &TurnContext,
+        reference_context_item: Option<&TurnContextItem>,
         _params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
-        turn_context
-            .developer_instructions
-            .as_ref()
-            .map(|text| Self { text: text.clone() })
-    }
-
-    fn diff_from_turn_context_item(
-        previous: &TurnContextItem,
-        turn_context: &TurnContext,
-        _params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        if previous.developer_instructions == turn_context.developer_instructions {
+        if reference_context_item.is_some_and(|previous| {
+            previous.developer_instructions == turn_context.developer_instructions
+        }) {
             return None;
         }
 
-        turn_context
-            .developer_instructions
-            .as_ref()
-            .map(|text| Self { text: text.clone() })
+        Some(Self {
+            text: turn_context.developer_instructions.as_ref()?.clone(),
+        })
     }
 }
 
@@ -187,7 +149,7 @@ impl TurnContextDiffFragment for CustomDeveloperInstructionsUpdateFragment {
 // Collaboration mode fragment
 // ---------------------------------------------------------------------------
 
-struct CollaborationModeUpdateFragment {
+pub(super) struct CollaborationModeUpdateFragment {
     text: String,
 }
 
@@ -200,28 +162,24 @@ impl ModelVisibleContextFragment for CollaborationModeUpdateFragment {
 }
 
 impl TurnContextDiffFragment for CollaborationModeUpdateFragment {
-    fn from_turn_context(
+    fn build(
         turn_context: &TurnContext,
+        reference_context_item: Option<&TurnContextItem>,
         _params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
+        if let Some(previous) = reference_context_item {
+            if previous.collaboration_mode.as_ref() != Some(&turn_context.collaboration_mode) {
+                // If the next mode has empty developer instructions, this returns None and we emit no
+                // update, so prior collaboration instructions remain in the prompt history.
+                return Some(Self {
+                    text: developer_collaboration_mode_text(&turn_context.collaboration_mode)?,
+                });
+            }
+            return None;
+        }
+
         developer_collaboration_mode_text(&turn_context.collaboration_mode)
             .map(|text| Self { text })
-    }
-
-    fn diff_from_turn_context_item(
-        previous: &TurnContextItem,
-        turn_context: &TurnContext,
-        _params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        if previous.collaboration_mode.as_ref() != Some(&turn_context.collaboration_mode) {
-            // If the next mode has empty developer instructions, this returns None and we emit no
-            // update, so prior collaboration instructions remain in the prompt history.
-            Some(Self {
-                text: developer_collaboration_mode_text(&turn_context.collaboration_mode)?,
-            })
-        } else {
-            None
-        }
     }
 }
 
@@ -244,7 +202,7 @@ fn realtime_update_text(
     }
 }
 
-pub(crate) struct RealtimeUpdateFragment {
+pub(super) struct RealtimeUpdateFragment {
     text: String,
 }
 
@@ -257,27 +215,13 @@ impl ModelVisibleContextFragment for RealtimeUpdateFragment {
 }
 
 impl TurnContextDiffFragment for RealtimeUpdateFragment {
-    fn from_turn_context(
+    fn build(
         turn_context: &TurnContext,
+        reference_context_item: Option<&TurnContextItem>,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
         realtime_update_text(
-            None,
-            turn_context.realtime_active,
-            params
-                .previous_turn_settings
-                .and_then(|settings| settings.realtime_active),
-        )
-        .map(|text| Self { text })
-    }
-
-    fn diff_from_turn_context_item(
-        previous: &TurnContextItem,
-        turn_context: &TurnContext,
-        params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        realtime_update_text(
-            previous.realtime_active,
+            reference_context_item.and_then(|previous| previous.realtime_active),
             turn_context.realtime_active,
             params
                 .previous_turn_settings
@@ -299,7 +243,7 @@ fn personality_message_for(model_info: &ModelInfo, personality: Personality) -> 
         .filter(|message| !message.is_empty())
 }
 
-struct PersonalityUpdateFragment {
+pub(super) struct PersonalityUpdateFragment {
     text: String,
 }
 
@@ -312,132 +256,47 @@ impl ModelVisibleContextFragment for PersonalityUpdateFragment {
 }
 
 impl TurnContextDiffFragment for PersonalityUpdateFragment {
-    fn from_turn_context(
+    fn build(
         turn_context: &TurnContext,
+        reference_context_item: Option<&TurnContextItem>,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
         if !params.personality_feature_enabled {
             return None;
         }
 
-        let personality = turn_context.personality?;
-        let has_baked_personality = params.base_instructions.is_some_and(|base_instructions| {
-            turn_context.model_info.supports_personality()
-                && base_instructions
-                    == turn_context
-                        .model_info
-                        .get_model_instructions(Some(personality))
-        });
-        if has_baked_personality {
-            return None;
-        }
-        let personality_message = personality_message_for(&turn_context.model_info, personality)?;
-        Some(Self {
-            text: developer_personality_spec_text(personality_message),
-        })
-    }
+        let Some(previous) = reference_context_item else {
+            let personality = turn_context.personality?;
+            let has_baked_personality = params.base_instructions.is_some_and(|base_instructions| {
+                turn_context.model_info.supports_personality()
+                    && base_instructions
+                        == turn_context
+                            .model_info
+                            .get_model_instructions(Some(personality))
+            });
+            if has_baked_personality {
+                return None;
+            }
+            let personality_message =
+                personality_message_for(&turn_context.model_info, personality)?;
+            return Some(Self {
+                text: developer_personality_spec_text(personality_message),
+            });
+        };
 
-    fn diff_from_turn_context_item(
-        previous: &TurnContextItem,
-        turn_context: &TurnContext,
-        params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        if !params.personality_feature_enabled {
-            return None;
-        }
         if turn_context.model_info.slug != previous.model {
             return None;
         }
-
         if let Some(personality) = turn_context.personality
             && turn_context.personality != previous.personality
         {
-            let model_info = &turn_context.model_info;
-            let personality_message = personality_message_for(model_info, personality)?;
-            Some(Self {
+            let personality_message =
+                personality_message_for(&turn_context.model_info, personality)?;
+            return Some(Self {
                 text: developer_personality_spec_text(personality_message),
-            })
-        } else {
-            None
+            });
         }
+
+        None
     }
-}
-
-fn build_registered_developer_fragment<F>(
-    pass: FragmentBuildPass,
-    previous: Option<&TurnContextItem>,
-    turn_context: &TurnContext,
-    params: &TurnContextDiffParams<'_>,
-) -> Option<DeveloperTextFragment>
-where
-    F: TurnContextDiffFragment<Role = DeveloperContextRole>,
-{
-    let fragment = match pass {
-        FragmentBuildPass::InitialContext => F::from_turn_context(turn_context, params),
-        FragmentBuildPass::TurnDiff => match previous {
-            Some(previous) => F::diff_from_turn_context_item(previous, turn_context, params),
-            None => F::from_turn_context(turn_context, params),
-        },
-    }?;
-    Some(DeveloperTextFragment::new(fragment.render_text()))
-}
-
-struct DeveloperFragmentRegistration {
-    build: fn(
-        FragmentBuildPass,
-        Option<&TurnContextItem>,
-        &TurnContext,
-        &TurnContextDiffParams<'_>,
-    ) -> Option<DeveloperTextFragment>,
-}
-
-impl DeveloperFragmentRegistration {
-    const fn of<F>() -> Self
-    where
-        F: TurnContextDiffFragment<Role = DeveloperContextRole>,
-    {
-        Self {
-            build: build_registered_developer_fragment::<F>,
-        }
-    }
-}
-
-impl TurnStateFragmentRegistration for DeveloperFragmentRegistration {
-    type Role = DeveloperContextRole;
-    type Fragment = DeveloperTextFragment;
-
-    fn build(
-        &self,
-        pass: FragmentBuildPass,
-        previous: Option<&TurnContextItem>,
-        turn_context: &TurnContext,
-        params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self::Fragment> {
-        (self.build)(pass, previous, turn_context, params)
-    }
-}
-
-const REGISTERED_DEVELOPER_FRAGMENT_BUILDERS: &[DeveloperFragmentRegistration] = &[
-    // Keep model-switch instructions first so model-specific guidance is read
-    // before any other context diffs on this turn.
-    DeveloperFragmentRegistration::of::<ModelInstructionsUpdateFragment>(),
-    DeveloperFragmentRegistration::of::<PermissionsUpdateFragment>(),
-    DeveloperFragmentRegistration::of::<CustomDeveloperInstructionsUpdateFragment>(),
-    DeveloperFragmentRegistration::of::<CollaborationModeUpdateFragment>(),
-    DeveloperFragmentRegistration::of::<RealtimeUpdateFragment>(),
-    DeveloperFragmentRegistration::of::<PersonalityUpdateFragment>(),
-];
-
-pub(super) fn build_registered_developer_fragments(
-    pass: FragmentBuildPass,
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-    params: &TurnContextDiffParams<'_>,
-) -> Vec<DeveloperTextFragment> {
-    REGISTERED_DEVELOPER_FRAGMENT_BUILDERS
-        .iter()
-        .filter_map(|registration| {
-            TurnStateFragmentRegistration::build(registration, pass, previous, next, params)
-        })
-        .collect()
 }

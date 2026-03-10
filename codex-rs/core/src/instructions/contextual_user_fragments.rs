@@ -45,28 +45,23 @@ impl ModelVisibleContextFragment for AgentsMdInstructions {
 }
 
 impl TurnContextDiffFragment for AgentsMdInstructions {
-    fn from_turn_context(
+    fn build(
         turn_context: &TurnContext,
+        reference_context_item: Option<&TurnContextItem>,
         _params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
         let text = turn_context.user_instructions.as_ref()?.clone();
-        Some(Self {
+        let current = Self {
             directory: turn_context.cwd.to_string_lossy().into_owned(),
             text,
-        })
-    }
-
-    fn diff_from_turn_context_item(
-        previous: &TurnContextItem,
-        turn_context: &TurnContext,
-        params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        let current = Self::from_turn_context(turn_context, params)?;
-        let previous_directory = previous.cwd.to_string_lossy().into_owned();
-        if previous.user_instructions.as_deref() == Some(current.text.as_str())
-            && previous_directory == current.directory
-        {
-            return None;
+        };
+        if let Some(previous) = reference_context_item {
+            let previous_directory = previous.cwd.to_string_lossy().into_owned();
+            if previous.user_instructions.as_deref() == Some(current.text.as_str())
+                && previous_directory == current.directory
+            {
+                return None;
+            }
         }
 
         Some(current)

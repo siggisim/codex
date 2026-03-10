@@ -183,17 +183,15 @@ impl<'a> TurnContextDiffParams<'a> {
 /// Implement this for fragments that are built from current/persisted turn
 /// state rather than one-off runtime events.
 pub(crate) trait TurnContextDiffFragment: ModelVisibleContextFragment + Sized {
-    fn from_turn_context(
+    /// Build the fragment from the current turn state and an optional baseline
+    /// context item that represents the turn state already reflected in the
+    /// model-visible history so far.
+    ///
+    /// `reference_context_item` is `None` for initial-context assembly and when
+    /// no baseline turn context can be recovered (for example after compaction).
+    fn build(
         turn_context: &TurnContext,
-        params: &TurnContextDiffParams<'_>,
-    ) -> Option<Self> {
-        let _ = (turn_context, params);
-        None
-    }
-
-    fn diff_from_turn_context_item(
-        previous: &TurnContextItem,
-        turn_context: &TurnContext,
+        reference_context_item: Option<&TurnContextItem>,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self>;
 }
