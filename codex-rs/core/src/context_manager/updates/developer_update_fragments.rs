@@ -7,6 +7,7 @@
 //! switch guidance).
 
 use super::FragmentBuildPass;
+use super::TurnStateFragmentRegistration;
 use crate::codex::TurnContext;
 use crate::features::Feature;
 use crate::model_visible_context::DeveloperContextRole;
@@ -399,6 +400,11 @@ impl DeveloperFragmentRegistration {
             build: build_registered_developer_fragment::<F>,
         }
     }
+}
+
+impl TurnStateFragmentRegistration for DeveloperFragmentRegistration {
+    type Role = DeveloperContextRole;
+    type Fragment = DeveloperTextFragment;
 
     fn build(
         &self,
@@ -406,7 +412,7 @@ impl DeveloperFragmentRegistration {
         previous: Option<&TurnContextItem>,
         turn_context: &TurnContext,
         params: &TurnContextDiffParams<'_>,
-    ) -> Option<DeveloperTextFragment> {
+    ) -> Option<Self::Fragment> {
         (self.build)(pass, previous, turn_context, params)
     }
 }
@@ -422,11 +428,6 @@ const REGISTERED_DEVELOPER_FRAGMENT_BUILDERS: &[DeveloperFragmentRegistration] =
     DeveloperFragmentRegistration::of::<PersonalityUpdateFragment>(),
 ];
 
-// TurnContextDiffFragment uses static constructors returning `Self`, which are
-// not object-safe for `dyn` dispatch. This typed registration adapter preserves
-// "register a fragment type once" ergonomics while keeping fragment behavior in
-// the trait implementations.
-
 pub(super) fn build_registered_developer_fragments(
     pass: FragmentBuildPass,
     previous: Option<&TurnContextItem>,
@@ -435,6 +436,8 @@ pub(super) fn build_registered_developer_fragments(
 ) -> Vec<DeveloperTextFragment> {
     REGISTERED_DEVELOPER_FRAGMENT_BUILDERS
         .iter()
-        .filter_map(|registration| registration.build(pass, previous, next, params))
+        .filter_map(|registration| {
+            TurnStateFragmentRegistration::build(registration, pass, previous, next, params)
+        })
         .collect()
 }

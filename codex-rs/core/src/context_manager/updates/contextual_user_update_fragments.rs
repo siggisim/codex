@@ -6,9 +6,11 @@
 //! canonical list.
 
 use super::FragmentBuildPass;
+use super::TurnStateFragmentRegistration;
 use crate::codex::TurnContext;
 use crate::environment_context::EnvironmentContext;
 use crate::instructions::AgentsMdInstructions;
+use crate::model_visible_context::ContextualUserContextRole;
 use crate::model_visible_context::ContextualUserTextFragment;
 use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
@@ -51,6 +53,11 @@ impl ContextualUserFragmentRegistration {
             build: build_registered_contextual_user_fragment::<F>,
         }
     }
+}
+
+impl TurnStateFragmentRegistration for ContextualUserFragmentRegistration {
+    type Role = ContextualUserContextRole;
+    type Fragment = ContextualUserTextFragment;
 
     fn build(
         &self,
@@ -58,15 +65,10 @@ impl ContextualUserFragmentRegistration {
         previous: Option<&TurnContextItem>,
         turn_context: &TurnContext,
         params: &TurnContextDiffParams<'_>,
-    ) -> Option<ContextualUserTextFragment> {
+    ) -> Option<Self::Fragment> {
         (self.build)(pass, previous, turn_context, params)
     }
 }
-
-// TurnContextDiffFragment uses static constructors returning `Self`, which are
-// not object-safe for `dyn` dispatch. This typed registration adapter preserves
-// "register a fragment type once" ergonomics while keeping fragment behavior in
-// the trait implementations.
 
 /// Canonical registry for turn-state contextual-user fragments.
 ///
@@ -90,6 +92,8 @@ pub(super) fn build_registered_contextual_user_fragments(
 ) -> Vec<ContextualUserTextFragment> {
     REGISTERED_CONTEXTUAL_USER_FRAGMENT_BUILDERS
         .iter()
-        .filter_map(|registration| registration.build(pass, previous, next, params))
+        .filter_map(|registration| {
+            TurnStateFragmentRegistration::build(registration, pass, previous, next, params)
+        })
         .collect()
 }

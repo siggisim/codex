@@ -27,7 +27,7 @@ When adding new model-visible context:
 3. Set the fragment `type Role` to the correct developer or contextual-user role.
 4. If it is a contextual-user fragment, wrap content with shared marker helpers/constants from `model_visible_context`.
 5. If the fragment is derived from durable/current turn state and should be diffed/reinjected after history mutations, also implement `TurnContextDiffFragment`.
-6. Register the fragment type in the turn-state fragment registries (`...FragmentRegistration::of::<YourType>()` in `context_manager/updates/developer_update_fragments.rs` or `context_manager/updates/contextual_user_update_fragments.rs`) so both initial-context and settings-update paths iterate it.
+6. Register the fragment type in the turn-state fragment registries (`...FragmentRegistration::of::<YourType>()` in `context_manager/updates/developer_update_fragments.rs` or `context_manager/updates/contextual_user_update_fragments.rs`). Both registries use the same `TurnStateFragmentRegistration` adapter trait.
 7. Push the resulting fragments through the shared envelope builders.
 
 Do not hand-build developer or contextual-user model-visible `ResponseItem`s in new code.

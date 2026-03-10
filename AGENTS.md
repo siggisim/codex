@@ -43,7 +43,7 @@ In the codex-rs folder where the rust code lives:
 - Use `<environment_context>` specifically for environment facts derived from `TurnContext` that may need turn-to-turn diffs (`cwd`, `shell`, optional `current_date`, optional `timezone`, optional network allow/deny domain summaries). Do not put policy text, plugin/skill listings, or other guidance into `<environment_context>`; those should use dedicated fragments.
 - Fragments derived from durable/current turn state that should update/reinject via diff across resume/fork/compaction/backtracking should implement `TurnContextDiffFragment` so current-state extraction, diffing, and rendering live together.
 - Runtime/session-prefix one-off fragments can implement only `ModelVisibleContextFragment` when they are not turn-state diffs.
-- Register new turn-state fragments by type in the fragment registry lists used by both initial-context and settings-update assembly (`...FragmentRegistration::of::<YourType>()` in `context_manager/updates/*_fragments.rs`) so they are discovered by iteration, not ad hoc wiring.
+- Register new turn-state fragments by type in the fragment registry lists used by both initial-context and settings-update assembly (`...FragmentRegistration::of::<YourType>()` in `context_manager/updates/*_fragments.rs`). Both envelope registries use the shared `TurnStateFragmentRegistration` adapter trait.
 - Do not hand-construct model-visible `ResponseItem::Message` payloads in new code; use fragment conversion and shared envelope builders.
 - Do not inject raw strings directly into the initial-context or settings-update builders, and do not call fragment wrapping helpers ad hoc from new code.
 

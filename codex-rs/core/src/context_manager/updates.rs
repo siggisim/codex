@@ -28,6 +28,27 @@ pub(crate) enum FragmentBuildPass {
     SettingsUpdate,
 }
 
+/// Shared adapter for turn-state fragment registries across both envelopes.
+///
+/// We need this adapter because `TurnContextDiffFragment` relies on static,
+/// `Self`-returning constructors (`from_turn_context` and
+/// `diff_from_turn_context_item`), which are not directly usable as a uniform
+/// registry interface. This trait gives both envelope registries one common
+/// "build for pass + context" shape while keeping fragment logic on the
+/// fragment types themselves.
+pub(crate) trait TurnStateFragmentRegistration {
+    type Role: ModelVisibleContextRole;
+    type Fragment: ModelVisibleContextFragment<Role = Self::Role>;
+
+    fn build(
+        &self,
+        pass: FragmentBuildPass,
+        previous: Option<&TurnContextItem>,
+        turn_context: &TurnContext,
+        params: &TurnContextDiffParams<'_>,
+    ) -> Option<Self::Fragment>;
+}
+
 pub(crate) struct TurnStateEnvelopeFragments {
     pub(crate) developer: Vec<DeveloperTextFragment>,
     pub(crate) contextual_user: Vec<ContextualUserTextFragment>,
