@@ -611,12 +611,14 @@ pub fn developer_permissions_with_network_text(
             let on_request_instructions = on_request_instructions();
             let sandbox_approval = reject_config.sandbox_approval;
             let rules = reject_config.rules;
+            let request_permissions = reject_config.request_permissions;
             let mcp_elicitations = reject_config.mcp_elicitations;
             format!(
                 "{on_request_instructions}\n\n\
                  Approval policy is `reject`.\n\
                  - `sandbox_approval`: {sandbox_approval}\n\
                  - `rules`: {rules}\n\
+                 - `request_permissions`: {request_permissions}\n\
                  - `mcp_elicitations`: {mcp_elicitations}\n\
                  When a category is `true`, requests in that category are auto-rejected instead of prompting the user."
             )
@@ -1349,6 +1351,7 @@ mod tests {
     use super::*;
     use crate::config_types::SandboxMode;
     use crate::protocol::AskForApproval;
+    use crate::protocol::RejectConfig;
     use anyhow::Result;
     use codex_execpolicy::Policy;
     use pretty_assertions::assert_eq;
@@ -1774,6 +1777,28 @@ mod tests {
         );
         assert!(text.contains("with_additional_permissions"));
         assert!(text.contains("additional_permissions"));
+    }
+
+    #[test]
+    fn includes_request_permissions_category_in_reject_policy_instructions() {
+        let text = developer_permissions_with_network_text(
+            SandboxMode::WorkspaceWrite,
+            NetworkAccess::Enabled,
+            AskForApproval::Reject(RejectConfig {
+                sandbox_approval: true,
+                rules: false,
+                request_permissions: true,
+                mcp_elicitations: false,
+            }),
+            false,
+            &Policy::empty(),
+            None,
+            true,
+        );
+        assert!(text.contains("- `sandbox_approval`: true"));
+        assert!(text.contains("- `rules`: false"));
+        assert!(text.contains("- `request_permissions`: true"));
+        assert!(text.contains("- `mcp_elicitations`: false"));
     }
 
     #[test]
