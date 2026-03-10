@@ -346,6 +346,8 @@
           "description": "Optional feature toggles scoped to this profile.",
           "properties": {
             "agent_function_call_inbox": {
+              "type": "boolean"
+            },
             "agent_prompt_injection": {
               "type": "boolean"
             },
@@ -1878,6 +1880,8 @@
       "description": "Centralized feature flags (new). Prefer this over individual toggles.",
       "properties": {
         "agent_function_call_inbox": {
+          "type": "boolean"
+        },
         "agent_prompt_injection": {
           "type": "boolean"
         },

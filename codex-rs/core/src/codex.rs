@@ -2228,10 +2228,10 @@ impl Session {
                 // Forked threads should remain file-backed immediately after startup.
                 self.ensure_rollout_materialized().await;
 
-                // Flush after seeding history and any persisted rollout copy.
-                if !is_subagent {
-                    self.flush_rollout().await;
-                }
+                // Flush after seeding history and any persisted rollout copy so forked child
+                // sessions are immediately durable and can be read back with their compact
+                // `ForkReference` suffix intact.
+                self.flush_rollout().await;
             }
         }
     }

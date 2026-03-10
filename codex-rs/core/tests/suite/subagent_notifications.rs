@@ -421,7 +421,9 @@ async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> 
                     "custom".to_string(),
                     AgentRoleConfig {
                         description: Some("Custom role".to_string()),
+                        model: None,
                         config_file: Some(role_path),
+                        spawn_mode: None,
                         nickname_candidates: None,
                     },
                 );

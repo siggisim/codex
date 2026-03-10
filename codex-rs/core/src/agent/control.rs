@@ -24,7 +24,6 @@ use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::AGENT_INBOX_KIND;
 use codex_protocol::protocol::AgentInboxPayload;
-use codex_protocol::protocol::ForkReferenceItem;
 use codex_protocol::protocol::InitialHistory;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::RolloutItem;
@@ -229,9 +228,28 @@ impl AgentControl {
                                 "parent thread rollout unavailable for fork: {parent_thread_id}"
                             ))
                         })?;
-                    let mut forked_rollout_items = RolloutRecorder::get_fork_history(&rollout_path)
+                    let forked_rollout_items = RolloutRecorder::get_fork_history(&rollout_path)
                         .await?
                         .get_rollout_items();
+                    let source_session_meta =
+                        forked_rollout_items.iter().find_map(|item| match item {
+                            RolloutItem::SessionMeta(meta_line) => Some(meta_line.clone()),
+                            RolloutItem::ForkReference(_)
+                            | RolloutItem::ResponseItem(_)
+                            | RolloutItem::Compacted(_)
+                            | RolloutItem::TurnContext(_)
+                            | RolloutItem::EventMsg(_) => None,
+                        });
+                    let mut forked_rollout_items = source_session_meta
+                        .into_iter()
+                        .map(RolloutItem::SessionMeta)
+                        .chain(std::iter::once(RolloutItem::ForkReference(
+                            codex_protocol::protocol::ForkReferenceItem {
+                                rollout_path: rollout_path.clone(),
+                                nth_user_message: usize::MAX,
+                            },
+                        )))
+                        .collect::<Vec<_>>();
                     let mut output = FunctionCallOutputPayload::from_text(
                         FORKED_SPAWN_AGENT_OUTPUT_MESSAGE.to_string(),
                     );
@@ -1986,7 +2004,7 @@ mod tests {
             resumed.history.iter().any(|item| {
                 matches!(
                     item,
-                    RolloutItem::ForkReference(ForkReferenceItem {
+                    RolloutItem::ForkReference(codex_protocol::protocol::ForkReferenceItem {
                         rollout_path,
                         nth_user_message,
                     }) if rollout_path == &parent_rollout_path && *nth_user_message == usize::MAX
