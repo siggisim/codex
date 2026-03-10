@@ -4684,6 +4684,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replace_chat_widget_keeps_replacement_terminal_title_cache_when_present() {
+        let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        app.chat_widget.last_terminal_title = Some("old-project | Ready".to_string());
+
+        let (mut replacement, _app_event_tx, _rx, _new_op_rx) =
+            make_chatwidget_manual_with_sender().await;
+        replacement.last_terminal_title = Some("new-project | Ready".to_string());
+
+        app.replace_chat_widget(replacement);
+
+        assert_eq!(
+            app.chat_widget.last_terminal_title,
+            Some("new-project | Ready".to_string())
+        );
+    }
+
+    #[tokio::test]
     async fn replay_thread_snapshot_restores_pending_pastes_for_submit() {
         let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
         let thread_id = ThreadId::new();
