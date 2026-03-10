@@ -16,6 +16,11 @@ use std::marker::PhantomData;
 
 // Keep fragment-specific diff/render logic in the sibling `*_fragments` modules
 // so this file can focus on shared envelope wiring and message assembly.
+//
+// Turn-state context should always flow through these builders as exactly two
+// model-visible envelopes:
+// - one developer message
+// - one contextual-user message
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FragmentBuildPass {

@@ -114,6 +114,8 @@ impl CodexThread {
         &self,
         fragment: impl ModelVisibleContextFragment,
     ) {
+        // Runtime/session-prefix path: inject one typed model-visible fragment
+        // without opening a real user turn boundary.
         self.inject_response_input_item_without_turn(fragment.into_response_input_item())
             .await;
     }

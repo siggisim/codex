@@ -8,6 +8,16 @@ Codex injects model-visible context through two envelopes:
 Both envelopes use the same internal fragment contract in `codex-rs/core`.
 Envelope builders normalize text fragment boundaries by inserting `\n\n` between adjacent text content items, so fragments do not run together in the model-visible token stream.
 
+## Canonical rules
+
+1. All model-visible injected context must be represented as a typed `ModelVisibleContextFragment`.
+2. Turn-state context assembly always produces exactly two envelopes: one developer message and one contextual-user message.
+3. Contextual-user fragments must use stable marker wrappers (or AGENTS.md-equivalent stable markers) so history parsing can distinguish contextual state from true user intent.
+4. If a fragment is derived from durable/current turn state and should survive history-mutating flows (resume/fork/compaction/backtracking) via re-diffing, it must implement `TurnContextDiffFragment`.
+5. Do not hand-construct model-visible `ResponseItem::Message` payloads in new code. Use fragment conversion (`into_message` / `into_response_input_item`) and envelope builders.
+
+Rule 2 applies to turn-state context assembly (`build_initial_context` / `build_settings_update_items`). Runtime or session-prefix events may inject standalone fragment messages, but those still must be typed `ModelVisibleContextFragment`s (rules 1 and 5).
+
 ## Blessed path
 
 When adding new model-visible context:
@@ -16,11 +26,11 @@ When adding new model-visible context:
 2. Implement `ModelVisibleContextFragment` for it.
 3. Set the fragment `type Role` to the correct developer or contextual-user role.
 4. If it is a contextual-user fragment, wrap content with shared marker helpers/constants from `model_visible_context`.
-5. If the fragment is derived from `TurnContext` and participates in turn-to-turn diffing, also implement `TurnContextDiffFragment`.
+5. If the fragment is derived from durable/current turn state and should be diffed/reinjected after history mutations, also implement `TurnContextDiffFragment`.
 6. Register it in the turn-state fragment registries (`context_manager/updates/developer_update_fragments.rs` and `context_manager/updates/contextual_user_update_fragments.rs`) so both initial-context and settings-update paths iterate it.
 7. Push the resulting fragments through the shared envelope builders.
 
-Do not hand-build developer or contextual-user `ResponseItem`s in new code unless there is a strong reason to bypass the fragment path.
+Do not hand-build developer or contextual-user model-visible `ResponseItem`s in new code.
 
 The role lives in the fragment's associated `type Role`. Marker/tag metadata for contextual-user fragments lives in the shared marker constants/helpers.
 
@@ -54,11 +64,13 @@ Use `<environment_context>` only for environment facts derived from turn/session
 
 ## Turn-backed fragments
 
-If a fragment is derived from durable turn/session state, keep its extraction, diffing, and rendering logic together by implementing `TurnContextDiffFragment`.
+If a fragment is derived from durable turn/session state and should be updated/reinjected by diff after history mutation, keep its extraction, diffing, and rendering logic together by implementing `TurnContextDiffFragment`.
 
 `TurnContextDiffFragment` receives `TurnContextDiffParams`, which carries shared runtime inputs used during diffing (for example shell, previous-turn bridge state, exec-policy rendering context, and feature gating flags).
 
 This is envelope-agnostic: both contextual-user state fragments and developer state-diff fragments use the same trait.
+
+If a fragment is runtime-event/session-prefix only (for example subagent completion notification, turn-aborted marker, or user-shell-command marker), `ModelVisibleContextFragment` alone is enough.
 
 That trait is the blessed path for fragments that need to:
 
