@@ -500,6 +500,20 @@ impl CustomDeveloperInstructions {
     }
 }
 
+impl From<CustomDeveloperInstructions> for ResponseItem {
+    fn from(instructions: CustomDeveloperInstructions) -> Self {
+        ResponseItem::Message {
+            id: None,
+            role: MessageRole::Developer.to_string(),
+            content: vec![ContentItem::InputText {
+                text: instructions.into_text(),
+            }],
+            end_turn: None,
+            phase: None,
+        }
+    }
+}
+
 pub fn developer_model_switch_text(model_instructions: String) -> String {
     format!(
         "<model_switch>\nThe user was previously using a different model. Please continue the conversation according to the following instructions:\n\n{model_instructions}\n</model_switch>"
@@ -1695,6 +1709,24 @@ mod tests {
             CustomDeveloperInstructions::new(
                 "Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The sandbox only permits reading files. Network access is restricted."
             )
+        );
+    }
+
+    #[test]
+    fn custom_developer_instructions_convert_to_developer_response_item() {
+        let instructions = CustomDeveloperInstructions::new("be concise");
+        let response_item: ResponseItem = instructions.into();
+        assert_eq!(
+            response_item,
+            ResponseItem::Message {
+                id: None,
+                role: MessageRole::Developer.to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "be concise".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            }
         );
     }
 
