@@ -22,6 +22,8 @@ use crate::tools::registry::ToolKind;
 use async_trait::async_trait;
 use codex_protocol::ThreadId;
 use codex_protocol::models::BaseInstructions;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::protocol::AgentSpawnMode;
 use codex_protocol::protocol::CollabAgentInteractionBeginEvent;
 use codex_protocol::protocol::CollabAgentInteractionEndEvent;
 use codex_protocol::protocol::CollabAgentRef;
@@ -208,6 +210,7 @@ mod spawn {
                     new_agent_nickname,
                     new_agent_role,
                     prompt,
+                    spawn_mode: AgentSpawnMode::Spawn,
                     status,
                 }
                 .into(),
