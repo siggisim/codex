@@ -338,6 +338,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         config_profile,
         // Default to never ask for approvals in headless mode. Feature flags can override.
         approval_policy: Some(AskForApproval::Never),
+        approval_review_policy: None,
         sandbox_mode,
         cwd: resolved_cwd,
         model_provider: model_provider.clone(),
@@ -686,6 +687,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                         input: items.into_iter().map(Into::into).collect(),
                         cwd: Some(default_cwd),
                         approval_policy: Some(default_approval_policy.into()),
+                        approval_review_policy: None,
                         sandbox_policy: Some(default_sandbox_policy.clone().into()),
                         model: None,
                         service_tier: None,
@@ -913,6 +915,7 @@ fn thread_start_params_from_config(config: &Config) -> ThreadStartParams {
         model_provider: Some(config.model_provider_id.clone()),
         cwd: Some(config.cwd.to_string_lossy().to_string()),
         approval_policy: Some(config.permissions.approval_policy.value().into()),
+        approval_review_policy: Some(config.approval_review_policy.into()),
         sandbox: sandbox_mode_from_policy(config.permissions.sandbox_policy.get()),
         ephemeral: Some(config.ephemeral),
         ..ThreadStartParams::default()
@@ -927,6 +930,7 @@ fn thread_resume_params_from_config(config: &Config, path: Option<PathBuf>) -> T
         model_provider: Some(config.model_provider_id.clone()),
         cwd: Some(config.cwd.to_string_lossy().to_string()),
         approval_policy: Some(config.permissions.approval_policy.value().into()),
+        approval_review_policy: Some(config.approval_review_policy.into()),
         sandbox: sandbox_mode_from_policy(config.permissions.sandbox_policy.get()),
         ..ThreadResumeParams::default()
     }
@@ -1020,6 +1024,7 @@ fn session_configured_from_thread_response(
         model_provider_id,
         service_tier,
         approval_policy,
+        approval_review_policy: codex_protocol::config_types::ApprovalReviewPolicy::ManualOnly,
         sandbox_policy,
         cwd,
         reasoning_effort,

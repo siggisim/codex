@@ -620,6 +620,13 @@
     "AppToolsConfig": {
       "type": "object"
     },
+    "ApprovalReviewPolicy": {
+      "enum": [
+        "manualOnly",
+        "autoOnly"
+      ],
+      "type": "string"
+    },
     "AppsConfig": {
       "properties": {
         "_default": {
@@ -2811,6 +2818,17 @@
             }
           ]
         },
+        "approval_review_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApprovalReviewPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional default approval review mode."
+        },
         "compact_prompt": {
           "type": [
             "string",
@@ -4275,6 +4293,14 @@
               ],
               "description": "When to escalate for approval for execution"
             },
+            "approval_review_policy": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ApprovalReviewPolicy"
+                }
+              ],
+              "description": "Whether approval requests remain manual or are automatically reviewed."
+            },
             "cwd": {
               "description": "Working directory that should be treated as the *root* of the session.",
               "type": "string"
@@ -4385,6 +4411,7 @@
           },
           "required": [
             "approval_policy",
+            "approval_review_policy",
             "cwd",
             "history_entry_count",
             "history_log_id",
@@ -9517,6 +9544,17 @@
             }
           ]
         },
+        "approval_review_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApprovalReviewPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional approval review mode override for this profile."
+        },
         "chatgpt_base_url": {
           "type": [
             "string",
@@ -13156,6 +13194,17 @@
             }
           ]
         },
+        "approvalReviewPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApprovalReviewPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Override whether approvals stay manual or are automatically reviewed for this thread and subsequent turns."
+        },
         "baseInstructions": {
           "type": [
             "string",
@@ -13240,6 +13289,14 @@
         "approvalPolicy": {
           "$ref": "#/definitions/AskForApproval"
         },
+        "approvalReviewPolicy": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalReviewPolicy"
+            }
+          ],
+          "description": "Whether approvals remain manual or are automatically reviewed."
+        },
         "cwd": {
           "type": "string"
         },
@@ -13278,6 +13335,7 @@
       },
       "required": [
         "approvalPolicy",
+        "approvalReviewPolicy",
         "cwd",
         "model",
         "modelProvider",
@@ -14324,6 +14382,17 @@
             }
           ]
         },
+        "approvalReviewPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApprovalReviewPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Override whether approvals stay manual or are automatically reviewed for this thread and subsequent turns."
+        },
         "baseInstructions": {
           "type": [
             "string",
@@ -14415,6 +14484,14 @@
         "approvalPolicy": {
           "$ref": "#/definitions/AskForApproval"
         },
+        "approvalReviewPolicy": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalReviewPolicy"
+            }
+          ],
+          "description": "Whether approvals remain manual or are automatically reviewed."
+        },
         "cwd": {
           "type": "string"
         },
@@ -14453,6 +14530,7 @@
       },
       "required": [
         "approvalPolicy",
+        "approvalReviewPolicy",
         "cwd",
         "model",
         "modelProvider",
@@ -14557,6 +14635,17 @@
             }
           ]
         },
+        "approvalReviewPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApprovalReviewPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Override whether approvals stay manual or are automatically reviewed for this thread and subsequent turns."
+        },
         "baseInstructions": {
           "type": [
             "string",
@@ -14653,6 +14742,14 @@
         "approvalPolicy": {
           "$ref": "#/definitions/AskForApproval"
         },
+        "approvalReviewPolicy": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalReviewPolicy"
+            }
+          ],
+          "description": "Whether approvals remain manual or are automatically reviewed."
+        },
         "cwd": {
           "type": "string"
         },
@@ -14691,6 +14788,7 @@
       },
       "required": [
         "approvalPolicy",
+        "approvalReviewPolicy",
         "cwd",
         "model",
         "modelProvider",
@@ -15477,6 +15575,17 @@
             }
           ],
           "description": "Override the approval policy for this turn and subsequent turns."
+        },
+        "approvalReviewPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApprovalReviewPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Override whether approvals stay manual or are automatically reviewed for this turn and subsequent turns."
         },
         "cwd": {
           "description": "Override the working directory for this turn and subsequent turns.",

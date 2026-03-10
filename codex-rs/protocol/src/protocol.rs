@@ -3002,6 +3002,9 @@ pub struct SessionConfiguredEvent {
     /// When to escalate for approval for execution
     pub approval_policy: AskForApproval,
 
+    /// Whether approval requests remain manual or are automatically reviewed.
+    pub approval_review_policy: ApprovalReviewPolicy,
+
     /// How to sandbox commands executed in the system
     pub sandbox_policy: SandboxPolicy,
 
@@ -4239,6 +4242,7 @@ mod tests {
                 model_provider_id: "openai".to_string(),
                 service_tier: None,
                 approval_policy: AskForApproval::Never,
+                approval_review_policy: ApprovalReviewPolicy::ManualOnly,
                 sandbox_policy: SandboxPolicy::new_read_only_policy(),
                 cwd: PathBuf::from("/home/user/project"),
                 reasoning_effort: Some(ReasoningEffortConfig::default()),
@@ -4258,6 +4262,7 @@ mod tests {
                 "model": "codex-mini-latest",
                 "model_provider_id": "openai",
                 "approval_policy": "never",
+                "approval_review_policy": "manual-only",
                 "sandbox_policy": {
                     "type": "read-only"
                 },
