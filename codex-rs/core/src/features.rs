@@ -452,7 +452,12 @@ fn legacy_usage_notice(alias: &str, feature: Feature) -> (String, Option<String>
             (summary, Some(web_search_details().to_string()))
         }
         _ => {
-            let summary = format!("`{alias}` is deprecated. Use `[features].{canonical}` instead.");
+            let label = if alias.contains('.') || alias.starts_with('[') {
+                alias.to_string()
+            } else {
+                format!("[features].{alias}")
+            };
+            let summary = format!("`{label}` is deprecated. Use `[features].{canonical}` instead.");
             let details = if alias == canonical {
                 None
             } else {
@@ -984,6 +989,22 @@ mod tests {
         assert_eq!(
             canonical_feature_for_key("smart_approvals"),
             Some(Feature::GuardianApproval)
+        );
+    }
+
+    #[test]
+    fn guardian_approval_alias_notice_uses_config_key_path() {
+        let (summary, details) =
+            legacy_usage_notice("guardian_approval", Feature::GuardianApproval);
+        assert_eq!(
+            summary,
+            "`[features].guardian_approval` is deprecated. Use `[features].smart_approvals` instead."
+        );
+        assert_eq!(
+            details,
+            Some(
+                "Enable it with `--enable smart_approvals` or `[features].smart_approvals` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details.".to_string()
+            )
         );
     }
 
