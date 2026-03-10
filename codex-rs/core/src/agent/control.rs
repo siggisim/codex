@@ -1954,17 +1954,6 @@ mod tests {
                 harness.config.clone(),
                 text_input("child task"),
                 Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-=======
-
-        let child_thread_id = harness
-            .control
-            .fork_agent(
-                harness.config.clone(),
-                text_input("watchdog helper"),
-                parent_thread_id,
-                usize::MAX,
-                SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
->>>>>>> origin/dev/friel/watchdog-runtime-and-prompts
                     parent_thread_id,
                     depth: 1,
                     agent_nickname: None,
