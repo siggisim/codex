@@ -11566,14 +11566,6 @@
             "description": "File or directory path associated with this event.",
             "type": "string"
           },
-          "eventType": {
-            "allOf": [
-              {
-                "$ref": "#/definitions/v2/FsWatchEventType"
-              }
-            ],
-            "description": "Node-style watch event type associated with the change."
-          },
           "watchId": {
             "description": "Watch identifier returned by `fs/watch`.",
             "type": "string"
@@ -11581,7 +11573,6 @@
         },
         "required": [
           "changedPath",
-          "eventType",
           "watchId"
         ],
         "title": "FsChangedNotification",
@@ -11823,25 +11814,6 @@
         "description": "Successful response for `fs/unwatch`.",
         "title": "FsUnwatchResponse",
         "type": "object"
-      },
-      "FsWatchEventType": {
-        "description": "Node-style event type reported by `fs/changed`.",
-        "oneOf": [
-          {
-            "description": "File data or metadata changed in place.",
-            "enum": [
-              "change"
-            ],
-            "type": "string"
-          },
-          {
-            "description": "Directory entry membership or name changed.",
-            "enum": [
-              "rename"
-            ],
-            "type": "string"
-          }
-        ]
       },
       "FsWatchParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",

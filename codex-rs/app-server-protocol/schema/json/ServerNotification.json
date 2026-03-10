@@ -970,14 +970,6 @@
           "description": "File or directory path associated with this event.",
           "type": "string"
         },
-        "eventType": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/FsWatchEventType"
-            }
-          ],
-          "description": "Node-style watch event type associated with the change."
-        },
         "watchId": {
           "description": "Watch identifier returned by `fs/watch`.",
           "type": "string"
@@ -985,29 +977,9 @@
       },
       "required": [
         "changedPath",
-        "eventType",
         "watchId"
       ],
       "type": "object"
-    },
-    "FsWatchEventType": {
-      "description": "Node-style event type reported by `fs/changed`.",
-      "oneOf": [
-        {
-          "description": "File data or metadata changed in place.",
-          "enum": [
-            "change"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Directory entry membership or name changed.",
-          "enum": [
-            "rename"
-          ],
-          "type": "string"
-        }
-      ]
     },
     "FuzzyFileSearchResult": {
       "description": "Superset of [`codex_file_search::FileMatch`]",

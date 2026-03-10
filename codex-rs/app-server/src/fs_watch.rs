@@ -6,7 +6,6 @@ use crate::outgoing_message::OutgoingMessageSender;
 use codex_app_server_protocol::FsChangedNotification;
 use codex_app_server_protocol::FsUnwatchParams;
 use codex_app_server_protocol::FsUnwatchResponse;
-use codex_app_server_protocol::FsWatchEventType;
 use codex_app_server_protocol::FsWatchParams;
 use codex_app_server_protocol::FsWatchResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
@@ -16,14 +15,12 @@ use notify::EventKind;
 use notify::RecommendedWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
-use notify::event::ModifyKind;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
@@ -41,19 +38,18 @@ pub(crate) struct FsWatchManager {
 
 #[derive(Default)]
 struct FsWatchState {
-    entries: HashMap<WatchKey, FsWatchEntry>,
-    watch_index: HashMap<String, WatchKey>,
+    entries: HashMap<WatchPathKey, FsWatchEntry>,
+    watch_index: HashMap<WatchKey, WatchPathKey>,
 }
 
 struct FsWatchEntry {
-    subscriptions: Arc<Mutex<HashMap<String, FsWatchSubscription>>>,
+    subscriptions: Arc<AsyncMutex<HashMap<WatchKey, FsWatchSubscription>>>,
     cancel: CancellationToken,
     _watcher: RecommendedWatcher,
 }
 
 #[derive(Clone)]
 struct FsWatchSubscription {
-    connection_id: ConnectionId,
     path: PathBuf,
     filter_path: Option<PathBuf>,
     last_observed_state: Option<ObservedPathState>,
@@ -61,12 +57,18 @@ struct FsWatchSubscription {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct WatchKey {
+    connection_id: ConnectionId,
+    watch_id: String,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct WatchPathKey {
     path: PathBuf,
 }
 
 struct ResolvedFsWatch {
     path: PathBuf,
-    watch_key: WatchKey,
+    watch_path_key: WatchPathKey,
     filter_path: Option<PathBuf>,
 }
 
@@ -98,12 +100,17 @@ impl FsWatchManager {
             "fs-watch-{}",
             self.next_watch_id.fetch_add(1, Ordering::Relaxed)
         );
-        let subscription = FsWatchSubscription {
+        let watch_key = WatchKey {
             connection_id,
+            watch_id: watch_id.clone(),
+        };
+        let subscription = FsWatchSubscription {
             path: resolved.path.clone(),
             filter_path: resolved.filter_path.clone(),
             last_observed_state: if resolved.filter_path.is_some() {
-                observe_path_state(&resolved.path).map_err(map_io_error)?
+                observe_path_state(&resolved.path)
+                    .await
+                    .map_err(map_io_error)?
             } else {
                 None
             },
@@ -112,15 +119,15 @@ impl FsWatchManager {
         let mut maybe_task = None;
         {
             let mut state = self.state.lock().await;
-            if let Some(entry) = state.entries.get(&resolved.watch_key) {
-                entry
-                    .subscriptions
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(watch_id.clone(), subscription);
+            if let Some(subscriptions) = state
+                .entries
+                .get(&resolved.watch_path_key)
+                .map(|entry| entry.subscriptions.clone())
+            {
                 state
                     .watch_index
-                    .insert(watch_id.clone(), resolved.watch_key.clone());
+                    .insert(watch_key.clone(), resolved.watch_path_key.clone());
+                subscriptions.lock().await.insert(watch_key, subscription);
             } else {
                 let (raw_tx, raw_rx) = mpsc::unbounded_channel();
                 let mut watcher = notify::recommended_watcher(move |res| {
@@ -128,16 +135,16 @@ impl FsWatchManager {
                 })
                 .map_err(map_notify_error)?;
                 watcher
-                    .watch(&resolved.watch_key.path, RecursiveMode::NonRecursive)
+                    .watch(&resolved.watch_path_key.path, RecursiveMode::NonRecursive)
                     .map_err(map_notify_error)?;
 
-                let subscriptions = Arc::new(Mutex::new(HashMap::from([(
-                    watch_id.clone(),
+                let subscriptions = Arc::new(AsyncMutex::new(HashMap::from([(
+                    watch_key.clone(),
                     subscription,
                 )])));
                 let cancel = CancellationToken::new();
                 state.entries.insert(
-                    resolved.watch_key.clone(),
+                    resolved.watch_path_key.clone(),
                     FsWatchEntry {
                         subscriptions: subscriptions.clone(),
                         cancel: cancel.clone(),
@@ -146,13 +153,18 @@ impl FsWatchManager {
                 );
                 state
                     .watch_index
-                    .insert(watch_id.clone(), resolved.watch_key.clone());
-                maybe_task = Some((resolved.watch_key.clone(), subscriptions, cancel, raw_rx));
+                    .insert(watch_key, resolved.watch_path_key.clone());
+                maybe_task = Some((
+                    resolved.watch_path_key.clone(),
+                    subscriptions,
+                    cancel,
+                    raw_rx,
+                ));
             }
         }
 
-        if let Some((watch_key, subscriptions, cancel, raw_rx)) = maybe_task {
-            self.spawn_watch_task(watch_key, subscriptions, cancel, raw_rx);
+        if let Some((watch_path_key, subscriptions, cancel, raw_rx)) = maybe_task {
+            self.spawn_watch_task(watch_path_key, subscriptions, cancel, raw_rx);
         }
 
         Ok(FsWatchResponse {
@@ -166,48 +178,27 @@ impl FsWatchManager {
         connection_id: ConnectionId,
         params: FsUnwatchParams,
     ) -> Result<FsUnwatchResponse, JSONRPCErrorError> {
-        let watch_id = &params.watch_id;
+        let watch_key = WatchKey {
+            connection_id,
+            watch_id: params.watch_id,
+        };
         let mut state = self.state.lock().await;
-        let Some(watch_key) = state.watch_index.get(watch_id).cloned() else {
+        let Some(watch_path_key) = state.watch_index.remove(&watch_key) else {
             return Ok(FsUnwatchResponse {});
         };
 
-        let mut should_remove_entry = false;
-        let mut should_remove_watch_index = false;
-        let mut has_connection_mismatch = false;
-        if let Some(entry) = state.entries.get(&watch_key) {
-            {
-                let mut subscriptions = entry
-                    .subscriptions
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                match subscriptions.get(watch_id) {
-                    Some(subscription) if subscription.connection_id == connection_id => {
-                        subscriptions.remove(watch_id);
-                        should_remove_watch_index = true;
-                        should_remove_entry = subscriptions.is_empty();
-                    }
-                    Some(_) => {
-                        has_connection_mismatch = true;
-                    }
-                    None => {
-                        should_remove_watch_index = true;
-                        should_remove_entry = subscriptions.is_empty();
-                    }
-                }
-            };
+        let should_remove_entry = if let Some(subscriptions) = state
+            .entries
+            .get(&watch_path_key)
+            .map(|entry| entry.subscriptions.clone())
+        {
+            let mut subscriptions = subscriptions.lock().await;
+            subscriptions.remove(&watch_key);
+            subscriptions.is_empty()
         } else {
-            should_remove_watch_index = true;
-        }
-
-        if has_connection_mismatch {
-            return Ok(FsUnwatchResponse {});
-        }
-
-        if should_remove_watch_index {
-            state.watch_index.remove(watch_id);
-        }
-        if should_remove_entry && let Some(entry) = state.entries.remove(&watch_key) {
+            false
+        };
+        if should_remove_entry && let Some(entry) = state.entries.remove(&watch_path_key) {
             entry.cancel.cancel();
         }
         Ok(FsUnwatchResponse {})
@@ -216,27 +207,26 @@ impl FsWatchManager {
     pub(crate) async fn connection_closed(&self, connection_id: ConnectionId) {
         let mut state = self.state.lock().await;
         let mut empty_keys = Vec::new();
-        let mut removed_watch_ids = Vec::new();
+        let mut removed_watch_keys = Vec::new();
 
         for (watch_key, entry) in &state.entries {
-            let mut subscriptions = entry
-                .subscriptions
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            subscriptions.retain(|watch_id, subscription| {
-                let keep = subscription.connection_id != connection_id;
-                if !keep {
-                    removed_watch_ids.push(watch_id.clone());
-                }
-                keep
-            });
+            let mut subscriptions = entry.subscriptions.lock().await;
+            let removed_for_entry: Vec<WatchKey> = subscriptions
+                .keys()
+                .filter(|watch_id| watch_id.connection_id == connection_id)
+                .cloned()
+                .collect();
+            for watch_id in &removed_for_entry {
+                subscriptions.remove(watch_id);
+            }
+            removed_watch_keys.extend(removed_for_entry);
             if subscriptions.is_empty() {
                 empty_keys.push(watch_key.clone());
             }
         }
 
-        for watch_id in removed_watch_ids {
-            state.watch_index.remove(&watch_id);
+        for watch_key in removed_watch_keys {
+            state.watch_index.remove(&watch_key);
         }
         for watch_key in empty_keys {
             if let Some(entry) = state.entries.remove(&watch_key) {
@@ -247,8 +237,8 @@ impl FsWatchManager {
 
     fn spawn_watch_task(
         &self,
-        watch_key: WatchKey,
-        subscriptions: Arc<Mutex<HashMap<String, FsWatchSubscription>>>,
+        watch_key: WatchPathKey,
+        subscriptions: Arc<AsyncMutex<HashMap<WatchKey, FsWatchSubscription>>>,
         cancel: CancellationToken,
         mut raw_rx: mpsc::UnboundedReceiver<notify::Result<Event>>,
     ) {
@@ -264,17 +254,10 @@ impl FsWatchManager {
                                     continue;
                                 }
 
-                                let event_type = map_event_type(event.kind);
                                 let notifications = {
-                                    let mut subscriptions = subscriptions
-                                        .lock()
-                                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                                    notifications_for_event(
-                                        &mut subscriptions,
-                                        &watch_key.path,
-                                        &event,
-                                        event_type,
-                                    )
+                                    let mut subscriptions = subscriptions.lock().await;
+                                    notifications_for_event(&mut subscriptions, &watch_key.path, &event)
+                                        .await
                                 };
                                 for (connection_id, notification) in notifications {
                                     outgoing
@@ -297,11 +280,10 @@ impl FsWatchManager {
     }
 }
 
-fn notifications_for_event(
-    subscriptions: &mut HashMap<String, FsWatchSubscription>,
+async fn notifications_for_event(
+    subscriptions: &mut HashMap<WatchKey, FsWatchSubscription>,
     watch_root: &Path,
     event: &Event,
-    event_type: FsWatchEventType,
 ) -> Vec<(ConnectionId, FsChangedNotification)> {
     let event_is_ambiguous_for_file_subscriptions =
         event.paths.is_empty() || event.paths.iter().all(|path| path == watch_root);
@@ -310,7 +292,7 @@ fn notifications_for_event(
     for (watch_id, subscription) in subscriptions.iter_mut() {
         if let Some(filter_path) = &subscription.filter_path {
             let is_relevant = if event_is_ambiguous_for_file_subscriptions {
-                match observe_path_state(&subscription.path) {
+                match observe_path_state(&subscription.path).await {
                     Ok(next_state) => {
                         let changed = next_state != subscription.last_observed_state;
                         subscription.last_observed_state = next_state;
@@ -330,7 +312,7 @@ fn notifications_for_event(
                     .iter()
                     .any(|path| path_matches_filter(path, filter_path, watch_root));
                 if is_relevant {
-                    match observe_path_state(&subscription.path) {
+                    match observe_path_state(&subscription.path).await {
                         Ok(next_state) => {
                             subscription.last_observed_state = next_state;
                         }
@@ -346,11 +328,10 @@ fn notifications_for_event(
             };
             if is_relevant {
                 notifications.push((
-                    subscription.connection_id,
+                    watch_id.connection_id,
                     FsChangedNotification {
-                        watch_id: watch_id.clone(),
+                        watch_id: watch_id.watch_id.clone(),
                         changed_path: subscription.path.clone(),
-                        event_type,
                     },
                 ));
             }
@@ -359,11 +340,10 @@ fn notifications_for_event(
 
         if event.paths.is_empty() {
             notifications.push((
-                subscription.connection_id,
+                watch_id.connection_id,
                 FsChangedNotification {
-                    watch_id: watch_id.clone(),
+                    watch_id: watch_id.watch_id.clone(),
                     changed_path: subscription.path.clone(),
-                    event_type,
                 },
             ));
             continue;
@@ -378,11 +358,10 @@ fn notifications_for_event(
             };
             if seen_paths.insert(changed_path.clone()) {
                 notifications.push((
-                    subscription.connection_id,
+                    watch_id.connection_id,
                     FsChangedNotification {
-                        watch_id: watch_id.clone(),
+                        watch_id: watch_id.watch_id.clone(),
                         changed_path,
-                        event_type,
                     },
                 ));
             }
@@ -392,8 +371,8 @@ fn notifications_for_event(
     notifications
 }
 
-fn observe_path_state(path: &Path) -> io::Result<Option<ObservedPathState>> {
-    match std::fs::metadata(path) {
+async fn observe_path_state(path: &Path) -> io::Result<Option<ObservedPathState>> {
+    match tokio::fs::metadata(path).await {
         Ok(metadata) => Ok(Some(ObservedPathState {
             is_directory: metadata.is_dir(),
             is_file: metadata.is_file(),
@@ -421,7 +400,7 @@ async fn resolve_fs_watch(params: FsWatchParams) -> Result<ResolvedFsWatch, JSON
                     .map_err(map_io_error)?;
                 return Ok(ResolvedFsWatch {
                     path: path.clone(),
-                    watch_key: WatchKey { path },
+                    watch_path_key: WatchPathKey { path },
                     filter_path: None,
                 });
             }
@@ -434,7 +413,7 @@ async fn resolve_fs_watch(params: FsWatchParams) -> Result<ResolvedFsWatch, JSON
             })?;
             return Ok(ResolvedFsWatch {
                 path: path.clone(),
-                watch_key: WatchKey {
+                watch_path_key: WatchPathKey {
                     path: watch_root.to_path_buf(),
                 },
                 filter_path: Some(path),
@@ -456,7 +435,7 @@ async fn resolve_fs_watch(params: FsWatchParams) -> Result<ResolvedFsWatch, JSON
     let path = watch_root.join(file_name);
     Ok(ResolvedFsWatch {
         path: path.clone(),
-        watch_key: WatchKey { path: watch_root },
+        watch_path_key: WatchPathKey { path: watch_root },
         filter_path: Some(path),
     })
 }
@@ -469,18 +448,6 @@ fn should_process_event(event: &Event) -> bool {
         | EventKind::Modify(_)
         | EventKind::Remove(_)
         | EventKind::Other => true,
-    }
-}
-
-fn map_event_type(event_kind: EventKind) -> FsWatchEventType {
-    match event_kind {
-        EventKind::Create(_) | EventKind::Remove(_) => FsWatchEventType::Rename,
-        EventKind::Modify(modify_kind) => match modify_kind {
-            ModifyKind::Name(_) => FsWatchEventType::Rename,
-            _ => FsWatchEventType::Change,
-        },
-        EventKind::Any | EventKind::Other => FsWatchEventType::Change,
-        EventKind::Access(_) => FsWatchEventType::Change,
     }
 }
 
@@ -498,17 +465,18 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
-    fn file_subscription(connection_id: u64, path: &Path) -> FsWatchSubscription {
+    async fn file_subscription(path: &Path) -> FsWatchSubscription {
         FsWatchSubscription {
-            connection_id: ConnectionId(connection_id),
             path: path.to_path_buf(),
             filter_path: Some(path.to_path_buf()),
-            last_observed_state: observe_path_state(path).expect("should capture file state"),
+            last_observed_state: observe_path_state(path)
+                .await
+                .expect("should capture file state"),
         }
     }
 
-    #[test]
-    fn ambiguous_watch_root_event_notifies_only_the_file_that_changed() {
+    #[tokio::test]
+    async fn ambiguous_watch_root_event_notifies_only_the_file_that_changed() {
         let temp_dir = TempDir::new().expect("temp dir");
         let watch_root = temp_dir.path();
         let head_path = watch_root.join("HEAD");
@@ -517,8 +485,20 @@ mod tests {
         std::fs::write(&fetch_head_path, "old-fetch\n").expect("write FETCH_HEAD");
 
         let mut subscriptions = HashMap::from([
-            ("head".to_string(), file_subscription(1, &head_path)),
-            ("fetch".to_string(), file_subscription(2, &fetch_head_path)),
+            (
+                WatchKey {
+                    connection_id: ConnectionId(1),
+                    watch_id: "head".to_string(),
+                },
+                file_subscription(&head_path).await,
+            ),
+            (
+                WatchKey {
+                    connection_id: ConnectionId(2),
+                    watch_id: "fetch".to_string(),
+                },
+                file_subscription(&fetch_head_path).await,
+            ),
         ]);
 
         std::fs::write(&head_path, "new-head\n").expect("update HEAD");
@@ -526,9 +506,10 @@ mod tests {
         let notifications = notifications_for_event(
             &mut subscriptions,
             watch_root,
-            &Event::new(EventKind::Modify(ModifyKind::Any)).add_path(watch_root.to_path_buf()),
-            FsWatchEventType::Change,
-        );
+            &Event::new(EventKind::Modify(notify::event::ModifyKind::Any))
+                .add_path(watch_root.to_path_buf()),
+        )
+        .await;
 
         assert_eq!(
             notifications,
@@ -537,14 +518,13 @@ mod tests {
                 FsChangedNotification {
                     watch_id: "head".to_string(),
                     changed_path: head_path,
-                    event_type: FsWatchEventType::Change,
                 },
             )]
         );
     }
 
-    #[test]
-    fn ambiguous_empty_paths_event_notifies_only_the_file_that_changed() {
+    #[tokio::test]
+    async fn ambiguous_empty_paths_event_notifies_only_the_file_that_changed() {
         let temp_dir = TempDir::new().expect("temp dir");
         let watch_root = temp_dir.path();
         let head_path = watch_root.join("HEAD");
@@ -553,8 +533,20 @@ mod tests {
         std::fs::write(&fetch_head_path, "old-fetch\n").expect("write FETCH_HEAD");
 
         let mut subscriptions = HashMap::from([
-            ("head".to_string(), file_subscription(1, &head_path)),
-            ("fetch".to_string(), file_subscription(2, &fetch_head_path)),
+            (
+                WatchKey {
+                    connection_id: ConnectionId(1),
+                    watch_id: "head".to_string(),
+                },
+                file_subscription(&head_path).await,
+            ),
+            (
+                WatchKey {
+                    connection_id: ConnectionId(2),
+                    watch_id: "fetch".to_string(),
+                },
+                file_subscription(&fetch_head_path).await,
+            ),
         ]);
 
         std::fs::write(&fetch_head_path, "new-fetch\n").expect("update FETCH_HEAD");
@@ -562,9 +554,9 @@ mod tests {
         let notifications = notifications_for_event(
             &mut subscriptions,
             watch_root,
-            &Event::new(EventKind::Modify(ModifyKind::Any)),
-            FsWatchEventType::Change,
-        );
+            &Event::new(EventKind::Modify(notify::event::ModifyKind::Any)),
+        )
+        .await;
 
         assert_eq!(
             notifications,
@@ -573,9 +565,68 @@ mod tests {
                 FsChangedNotification {
                     watch_id: "fetch".to_string(),
                     changed_path: fetch_head_path,
-                    event_type: FsWatchEventType::Change,
                 },
             )]
         );
+    }
+
+    #[tokio::test]
+    async fn unwatch_is_scoped_to_the_connection_that_created_the_watch() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let head_path = temp_dir.path().join("HEAD");
+        std::fs::write(&head_path, "ref: refs/heads/main\n").expect("write HEAD");
+
+        let (tx, _rx) = mpsc::channel(1);
+        let manager = FsWatchManager::new(Arc::new(OutgoingMessageSender::new(tx)));
+        let response = manager
+            .watch(
+                ConnectionId(1),
+                FsWatchParams {
+                    path: head_path.clone(),
+                },
+            )
+            .await
+            .expect("watch should succeed");
+
+        manager
+            .unwatch(
+                ConnectionId(2),
+                FsUnwatchParams {
+                    watch_id: response.watch_id.clone(),
+                },
+            )
+            .await
+            .expect("foreign unwatch should be a no-op");
+
+        let watch_path_key = WatchPathKey {
+            path: head_path
+                .parent()
+                .expect("watched file should have parent")
+                .canonicalize()
+                .expect("canonicalize watch root"),
+        };
+        let watch_key = WatchKey {
+            connection_id: ConnectionId(1),
+            watch_id: response.watch_id.clone(),
+        };
+        let state = manager.state.lock().await;
+        let entry = state
+            .entries
+            .get(&watch_path_key)
+            .expect("watch entry should remain");
+        assert_eq!(state.watch_index.get(&watch_key), Some(&watch_path_key));
+        let subscriptions = entry.subscriptions.clone();
+        drop(state);
+        assert!(subscriptions.lock().await.contains_key(&watch_key));
+
+        manager
+            .unwatch(
+                ConnectionId(1),
+                FsUnwatchParams {
+                    watch_id: response.watch_id,
+                },
+            )
+            .await
+            .expect("owner unwatch should succeed");
     }
 }

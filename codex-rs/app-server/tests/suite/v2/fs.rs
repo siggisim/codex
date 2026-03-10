@@ -10,7 +10,6 @@ use codex_app_server_protocol::FsGetMetadataResponse;
 use codex_app_server_protocol::FsReadDirectoryEntry;
 use codex_app_server_protocol::FsReadFileResponse;
 use codex_app_server_protocol::FsUnwatchParams;
-use codex_app_server_protocol::FsWatchEventType;
 use codex_app_server_protocol::FsWatchResponse;
 use codex_app_server_protocol::FsWriteFileParams;
 use codex_app_server_protocol::JSONRPCNotification;
@@ -605,13 +604,6 @@ async fn fs_watch_directory_reports_changed_child_paths_and_unwatch_stops_notifi
     let changed = fs_changed_notification(notification)?;
     assert_eq!(changed.watch_id, watch_response.watch_id.clone());
     assert_eq!(changed.changed_path, fetch_head.canonicalize()?);
-    assert!(
-        matches!(
-            changed.event_type,
-            FsWatchEventType::Change | FsWatchEventType::Rename
-        ),
-        "directory watch should surface a Node-style change or rename event"
-    );
     while timeout(
         Duration::from_millis(200),
         mcp.read_stream_until_notification_message("fs/changed"),
@@ -681,7 +673,6 @@ async fn fs_watch_file_reports_atomic_replace_events() -> Result<()> {
         FsChangedNotification {
             watch_id: watch_response.watch_id,
             changed_path: head_path.canonicalize()?,
-            event_type: FsWatchEventType::Rename,
         }
     );
 
@@ -726,7 +717,6 @@ async fn fs_watch_allows_missing_file_targets() -> Result<()> {
         FsChangedNotification {
             watch_id: watch_response.watch_id,
             changed_path: git_dir.canonicalize()?.join("FETCH_HEAD"),
-            event_type: FsWatchEventType::Rename,
         }
     );
 

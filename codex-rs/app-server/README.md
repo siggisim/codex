@@ -162,7 +162,7 @@ Example with notification opt-out:
 - `fs/copy` — copy between absolute paths; directory copies require `recursive: true` and ignore unsupported special files such as FIFOs or sockets.
 - `fs/watch` — subscribe this connection to filesystem change notifications for an absolute file or directory path; returns a `watchId` and canonicalized `path`.
 - `fs/unwatch` — stop sending notifications for a prior `fs/watch`; returns `{}`.
-- `fs/changed` — notification emitted when a watched path changes, including the `watchId`, `changedPath`, and a Node-style `eventType` (`change` or `rename`).
+- `fs/changed` — notification emitted when a watched path changes, including the `watchId` and `changedPath`.
 - `model/list` — list available models (set `includeHidden: true` to include entries with `hidden: true`), with reasoning effort options, optional legacy `upgrade` model ids, optional `upgradeInfo` metadata (`model`, `upgradeCopy`, `modelLink`, `migrationMarkdown`), and optional `availabilityNux` metadata.
 - `experimentalFeature/list` — list feature flags with stage metadata (`beta`, `underDevelopment`, `stable`, etc.), enabled/default-enabled state, and cursor pagination. For non-beta flags, `displayName`/`description`/`announcement` are `null`.
 - `collaborationMode/list` — list available collaboration mode presets (experimental, no pagination). This response omits built-in developer instructions; clients should either pass `settings.developer_instructions: null` when setting a mode to use Codex's built-in instructions, or provide their own instructions explicitly.
@@ -774,8 +774,7 @@ All filesystem paths in this section must be absolute.
 } }
 { "method": "fs/changed", "params": {
     "watchId": "fs-watch-0",
-    "changedPath": "/Users/me/project/.git/HEAD",
-    "eventType": "rename"
+    "changedPath": "/Users/me/project/.git/HEAD"
 } }
 { "method": "fs/unwatch", "id": 45, "params": {
     "watchId": "fs-watch-0"

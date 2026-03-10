@@ -2176,17 +2176,6 @@ pub struct FsCopyParams {
 #[ts(export_to = "v2/")]
 pub struct FsCopyResponse {}
 
-/// Node-style event type reported by `fs/changed`.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(rename_all = "lowercase", export_to = "v2/")]
-pub enum FsWatchEventType {
-    /// File data or metadata changed in place.
-    Change,
-    /// Directory entry membership or name changed.
-    Rename,
-}
-
 /// Start filesystem watch notifications for an absolute path.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -2231,8 +2220,6 @@ pub struct FsChangedNotification {
     pub watch_id: String,
     /// File or directory path associated with this event.
     pub changed_path: PathBuf,
-    /// Node-style watch event type associated with the change.
-    pub event_type: FsWatchEventType,
 }
 
 /// PTY size in character cells for `command/exec` PTY sessions.
@@ -5995,7 +5982,6 @@ mod tests {
         let notification = FsChangedNotification {
             watch_id: "fs-watch-7".to_string(),
             changed_path: PathBuf::from("/tmp/repo/.git/HEAD"),
-            event_type: FsWatchEventType::Rename,
         };
 
         let value = serde_json::to_value(&notification).expect("serialize fs/changed notification");
@@ -6004,7 +5990,6 @@ mod tests {
             json!({
                 "watchId": "fs-watch-7",
                 "changedPath": "/tmp/repo/.git/HEAD",
-                "eventType": "rename",
             })
         );
 
