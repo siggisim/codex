@@ -9824,7 +9824,38 @@ async fn default_terminal_title_refreshes_when_status_changes() {
     chat.config.animations = false;
 
     chat.config.tui_terminal_title = None;
-    chat.last_terminal_title = Some("codex | Ready".to_string());
+    let cwd = chat
+        .current_cwd
+        .clone()
+        .unwrap_or_else(|| chat.config.cwd.clone());
+    let project = get_git_repo_root(&cwd)
+        .map(|root| {
+            root.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| format_directory_display(&root, None))
+        })
+        .or_else(|| {
+            chat.config
+                .config_layer_stack
+                .get_layers(ConfigLayerStackOrdering::LowestPrecedenceFirst, true)
+                .iter()
+                .find_map(|layer| match &layer.name {
+                    ConfigLayerSource::Project { dot_codex_folder } => {
+                        dot_codex_folder.as_path().parent().map(|path| {
+                            path.file_name()
+                                .map(|name| name.to_string_lossy().to_string())
+                                .unwrap_or_else(|| format_directory_display(path, None))
+                        })
+                    }
+                    _ => None,
+                })
+        })
+        .unwrap_or_else(|| {
+            cwd.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| format_directory_display(&cwd, None))
+        });
+    chat.last_terminal_title = Some(format!("{project} | Ready"));
     chat.bottom_pane.set_task_running(true);
     chat.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
 
@@ -9832,7 +9863,7 @@ async fn default_terminal_title_refreshes_when_status_changes() {
 
     assert_eq!(
         chat.last_terminal_title,
-        Some("codex | Thinking".to_string())
+        Some(format!("{project} | Thinking"))
     );
 }
 
