@@ -27,7 +27,6 @@ use crate::tools::registry::ToolKind;
 use async_trait::async_trait;
 use codex_protocol::ThreadId;
 use codex_protocol::models::BaseInstructions;
-use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::protocol::AgentSpawnMode;
 use codex_protocol::protocol::CollabAgentInteractionBeginEvent;
 use codex_protocol::protocol::CollabAgentInteractionEndEvent;
@@ -654,7 +653,7 @@ mod compact_parent_context {
         _turn: Arc<TurnContext>,
         _call_id: String,
         arguments: String,
-    ) -> Result<ToolOutput, FunctionCallError> {
+    ) -> Result<FunctionToolOutput, FunctionCallError> {
         let args: CompactParentContextArgs = parse_arguments(&arguments)?;
         let _reason = args.reason.and_then(|reason| {
             let trimmed = reason.trim();
@@ -706,10 +705,7 @@ mod compact_parent_context {
             ))
         })?;
 
-        Ok(ToolOutput::Function {
-            body: FunctionCallOutputBody::Text(content),
-            success: Some(true),
-        })
+        Ok(FunctionToolOutput::from_text(content, Some(true)))
     }
 }
 
@@ -748,7 +744,7 @@ mod list_agents {
         _turn: Arc<TurnContext>,
         _call_id: String,
         arguments: String,
-    ) -> Result<ToolOutput, FunctionCallError> {
+    ) -> Result<FunctionToolOutput, FunctionCallError> {
         let args: ListAgentsArgs = parse_arguments(&arguments)?;
         let owner_thread_id = match args.id.as_deref().map(str::trim) {
             Some(id) if !id.is_empty() && !matches!(id, "self") => agent_id(id)?,
@@ -779,10 +775,7 @@ mod list_agents {
             FunctionCallError::Fatal(format!("failed to serialize list_agents result: {err}"))
         })?;
 
-        Ok(ToolOutput::Function {
-            body: FunctionCallOutputBody::Text(content),
-            success: Some(true),
-        })
+        Ok(FunctionToolOutput::from_text(content, Some(true)))
     }
 }
 
@@ -818,7 +811,7 @@ pub(crate) mod wait {
         turn: Arc<TurnContext>,
         call_id: String,
         arguments: String,
-    ) -> Result<ToolOutput, FunctionCallError> {
+    ) -> Result<FunctionToolOutput, FunctionCallError> {
         if let Some(owner_thread_id) = session
             .services
             .agent_control
@@ -1153,10 +1146,7 @@ pub mod close_agent {
                         },
                     )?;
 
-                    Ok(ToolOutput::Function {
-                        body: FunctionCallOutputBody::Text(content),
-                        success: Some(true),
-                    })
+                    Ok(FunctionToolOutput::from_text(content, Some(true)))
                 } else {
                     Err(collab_agent_error(agent_id, err))
                 };

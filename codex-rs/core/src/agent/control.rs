@@ -486,21 +486,6 @@ impl AgentControl {
         result
     }
 
-    pub(crate) async fn send_prompt(
-        &self,
-        agent_id: ThreadId,
-        prompt: String,
-    ) -> CodexResult<String> {
-        self.send_input(
-            agent_id,
-            vec![UserInput::Text {
-                text: prompt,
-                text_elements: Vec::new(),
-            }],
-        )
-        .await
-    }
-
     /// Deliver inbox input to an existing agent thread.
     ///
     /// Watchdog helpers rely on this as the mandatory fallback wake-up path when

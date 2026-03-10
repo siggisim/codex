@@ -1079,6 +1079,7 @@ fn create_compact_parent_context_tool() -> ToolSpec {
         description: "Watchdog-only: request compaction for the watchdog helper's parent thread when it is idle and appears stuck."
             .to_string(),
         strict: false,
+        output_schema: None,
         parameters: JsonSchema::Object {
             properties,
             required: None,
@@ -1126,6 +1127,7 @@ fn create_list_agents_tool(agent_watchdog: bool) -> ToolSpec {
         name: "list_agents".to_string(),
         description: description.to_string(),
         strict: false,
+        output_schema: None,
         parameters: JsonSchema::Object {
             properties,
             required: None,
