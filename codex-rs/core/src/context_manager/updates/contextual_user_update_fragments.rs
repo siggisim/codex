@@ -10,21 +10,63 @@ use crate::codex::TurnContext;
 use crate::environment_context::EnvironmentContext;
 use crate::instructions::AgentsMdInstructions;
 use crate::model_visible_context::ContextualUserTextFragment;
-use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
 use codex_protocol::protocol::TurnContextItem;
 
-// We use function pointers here (instead of a trait-object registry) because
-// turn-state fragment construction/diffing is modeled as static constructors on
-// concrete fragment types (`from_turn_context` / `diff_from_turn_context_item`)
-// that return `Self`. That pattern is not object-safe for `dyn` dispatch.
-type ContextualUserFragmentBuilder = fn(
-    FragmentBuildPass,
-    Option<&TurnContextItem>,
-    &TurnContext,
-    &TurnContextDiffParams<'_>,
-) -> Option<ContextualUserTextFragment>;
+fn build_registered_contextual_user_fragment<F>(
+    pass: FragmentBuildPass,
+    previous: Option<&TurnContextItem>,
+    turn_context: &TurnContext,
+    params: &TurnContextDiffParams<'_>,
+) -> Option<ContextualUserTextFragment>
+where
+    F: TurnContextDiffFragment<Role = crate::model_visible_context::ContextualUserContextRole>,
+{
+    let fragment = match pass {
+        FragmentBuildPass::InitialContext => F::from_turn_context(turn_context, params),
+        FragmentBuildPass::SettingsUpdate => match previous {
+            Some(previous) => F::diff_from_turn_context_item(previous, turn_context, params),
+            None => F::from_turn_context(turn_context, params),
+        },
+    }?;
+    Some(ContextualUserTextFragment::new(fragment.render_text()))
+}
+
+struct ContextualUserFragmentRegistration {
+    build: fn(
+        FragmentBuildPass,
+        Option<&TurnContextItem>,
+        &TurnContext,
+        &TurnContextDiffParams<'_>,
+    ) -> Option<ContextualUserTextFragment>,
+}
+
+impl ContextualUserFragmentRegistration {
+    const fn of<F>() -> Self
+    where
+        F: TurnContextDiffFragment<Role = crate::model_visible_context::ContextualUserContextRole>,
+    {
+        Self {
+            build: build_registered_contextual_user_fragment::<F>,
+        }
+    }
+
+    fn build(
+        &self,
+        pass: FragmentBuildPass,
+        previous: Option<&TurnContextItem>,
+        turn_context: &TurnContext,
+        params: &TurnContextDiffParams<'_>,
+    ) -> Option<ContextualUserTextFragment> {
+        (self.build)(pass, previous, turn_context, params)
+    }
+}
+
+// TurnContextDiffFragment uses static constructors returning `Self`, which are
+// not object-safe for `dyn` dispatch. This typed registration adapter preserves
+// "register a fragment type once" ergonomics while keeping fragment behavior in
+// the trait implementations.
 
 /// Canonical registry for turn-state contextual-user fragments.
 ///
@@ -33,43 +75,12 @@ type ContextualUserFragmentBuilder = fn(
 /// 2. Implement `ModelVisibleContextFragment` (contextual-user role + stable marker rendering).
 /// 3. Implement `TurnContextDiffFragment` if the fragment should be built from current turn state
 ///    and diffed against persisted `TurnContextItem`.
-/// 4. Add one builder entry to this list (and keep ordering intentional).
-const REGISTERED_CONTEXTUAL_USER_FRAGMENT_BUILDERS: &[ContextualUserFragmentBuilder] =
-    &[build_agents_md_fragment, build_environment_context_fragment];
-
-fn build_agents_md_fragment(
-    pass: FragmentBuildPass,
-    previous: Option<&TurnContextItem>,
-    turn_context: &TurnContext,
-    params: &TurnContextDiffParams<'_>,
-) -> Option<ContextualUserTextFragment> {
-    match pass {
-        FragmentBuildPass::InitialContext => {
-            AgentsMdInstructions::from_turn_context(turn_context, params)
-        }
-        FragmentBuildPass::SettingsUpdate => previous.and_then(|previous| {
-            AgentsMdInstructions::diff_from_turn_context_item(previous, turn_context, params)
-        }),
-    }
-    .map(|fragment| ContextualUserTextFragment::new(fragment.render_text()))
-}
-
-fn build_environment_context_fragment(
-    pass: FragmentBuildPass,
-    previous: Option<&TurnContextItem>,
-    turn_context: &TurnContext,
-    params: &TurnContextDiffParams<'_>,
-) -> Option<ContextualUserTextFragment> {
-    match pass {
-        FragmentBuildPass::InitialContext => {
-            EnvironmentContext::from_turn_context(turn_context, params)
-        }
-        FragmentBuildPass::SettingsUpdate => previous.and_then(|previous| {
-            EnvironmentContext::diff_from_turn_context_item(previous, turn_context, params)
-        }),
-    }
-    .map(|fragment| ContextualUserTextFragment::new(fragment.render_text()))
-}
+/// 4. Register the type here with `ContextualUserFragmentRegistration::of::<YourType>()` and
+///    keep ordering intentional.
+const REGISTERED_CONTEXTUAL_USER_FRAGMENT_BUILDERS: &[ContextualUserFragmentRegistration] = &[
+    ContextualUserFragmentRegistration::of::<AgentsMdInstructions>(),
+    ContextualUserFragmentRegistration::of::<EnvironmentContext>(),
+];
 
 pub(super) fn build_registered_contextual_user_fragments(
     pass: FragmentBuildPass,
@@ -79,6 +90,6 @@ pub(super) fn build_registered_contextual_user_fragments(
 ) -> Vec<ContextualUserTextFragment> {
     REGISTERED_CONTEXTUAL_USER_FRAGMENT_BUILDERS
         .iter()
-        .filter_map(|builder| builder(pass, previous, next, params))
+        .filter_map(|registration| registration.build(pass, previous, next, params))
         .collect()
 }

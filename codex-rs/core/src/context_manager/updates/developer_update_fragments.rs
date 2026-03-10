@@ -362,116 +362,70 @@ impl TurnContextDiffFragment for PersonalityUpdateFragment {
     }
 }
 
-type DeveloperFragmentBuilder = fn(
-    FragmentBuildPass,
-    Option<&TurnContextItem>,
-    &TurnContext,
-    &TurnContextDiffParams<'_>,
-) -> Option<DeveloperTextFragment>;
-
-const REGISTERED_DEVELOPER_FRAGMENT_BUILDERS: &[DeveloperFragmentBuilder] = &[
-    build_model_instructions_fragment,
-    build_permissions_fragment,
-    build_custom_developer_instructions_fragment,
-    build_collaboration_mode_fragment,
-    build_realtime_fragment,
-    build_personality_fragment,
-];
-
-fn build_model_instructions_fragment(
-    _pass: FragmentBuildPass,
-    _previous: Option<&TurnContextItem>,
-    next: &TurnContext,
+fn build_registered_developer_fragment<F>(
+    pass: FragmentBuildPass,
+    previous: Option<&TurnContextItem>,
+    turn_context: &TurnContext,
     params: &TurnContextDiffParams<'_>,
-) -> Option<DeveloperTextFragment> {
+) -> Option<DeveloperTextFragment>
+where
+    F: TurnContextDiffFragment<Role = DeveloperContextRole>,
+{
+    let fragment = match pass {
+        FragmentBuildPass::InitialContext => F::from_turn_context(turn_context, params),
+        FragmentBuildPass::SettingsUpdate => match previous {
+            Some(previous) => F::diff_from_turn_context_item(previous, turn_context, params),
+            None => F::from_turn_context(turn_context, params),
+        },
+    }?;
+    Some(DeveloperTextFragment::new(fragment.render_text()))
+}
+
+struct DeveloperFragmentRegistration {
+    build: fn(
+        FragmentBuildPass,
+        Option<&TurnContextItem>,
+        &TurnContext,
+        &TurnContextDiffParams<'_>,
+    ) -> Option<DeveloperTextFragment>,
+}
+
+impl DeveloperFragmentRegistration {
+    const fn of<F>() -> Self
+    where
+        F: TurnContextDiffFragment<Role = DeveloperContextRole>,
+    {
+        Self {
+            build: build_registered_developer_fragment::<F>,
+        }
+    }
+
+    fn build(
+        &self,
+        pass: FragmentBuildPass,
+        previous: Option<&TurnContextItem>,
+        turn_context: &TurnContext,
+        params: &TurnContextDiffParams<'_>,
+    ) -> Option<DeveloperTextFragment> {
+        (self.build)(pass, previous, turn_context, params)
+    }
+}
+
+const REGISTERED_DEVELOPER_FRAGMENT_BUILDERS: &[DeveloperFragmentRegistration] = &[
     // Keep model-switch instructions first so model-specific guidance is read
     // before any other context diffs on this turn.
-    ModelInstructionsUpdateFragment::from_turn_context(next, params)
-        .map(|fragment| DeveloperTextFragment::new(fragment.text))
-}
+    DeveloperFragmentRegistration::of::<ModelInstructionsUpdateFragment>(),
+    DeveloperFragmentRegistration::of::<PermissionsUpdateFragment>(),
+    DeveloperFragmentRegistration::of::<CustomDeveloperInstructionsUpdateFragment>(),
+    DeveloperFragmentRegistration::of::<CollaborationModeUpdateFragment>(),
+    DeveloperFragmentRegistration::of::<RealtimeUpdateFragment>(),
+    DeveloperFragmentRegistration::of::<PersonalityUpdateFragment>(),
+];
 
-fn build_permissions_fragment(
-    pass: FragmentBuildPass,
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-    params: &TurnContextDiffParams<'_>,
-) -> Option<DeveloperTextFragment> {
-    match pass {
-        FragmentBuildPass::InitialContext => {
-            PermissionsUpdateFragment::from_turn_context(next, params)
-        }
-        FragmentBuildPass::SettingsUpdate => previous.and_then(|previous| {
-            PermissionsUpdateFragment::diff_from_turn_context_item(previous, next, params)
-        }),
-    }
-    .map(|fragment| DeveloperTextFragment::new(fragment.text))
-}
-
-fn build_custom_developer_instructions_fragment(
-    pass: FragmentBuildPass,
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-    params: &TurnContextDiffParams<'_>,
-) -> Option<DeveloperTextFragment> {
-    match pass {
-        FragmentBuildPass::InitialContext => {
-            CustomDeveloperInstructionsUpdateFragment::from_turn_context(next, params)
-        }
-        FragmentBuildPass::SettingsUpdate => previous.and_then(|previous| {
-            CustomDeveloperInstructionsUpdateFragment::diff_from_turn_context_item(
-                previous, next, params,
-            )
-        }),
-    }
-    .map(|fragment| DeveloperTextFragment::new(fragment.text))
-}
-
-fn build_collaboration_mode_fragment(
-    pass: FragmentBuildPass,
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-    params: &TurnContextDiffParams<'_>,
-) -> Option<DeveloperTextFragment> {
-    match pass {
-        FragmentBuildPass::InitialContext => {
-            CollaborationModeUpdateFragment::from_turn_context(next, params)
-        }
-        FragmentBuildPass::SettingsUpdate => previous.and_then(|previous| {
-            CollaborationModeUpdateFragment::diff_from_turn_context_item(previous, next, params)
-        }),
-    }
-    .map(|fragment| DeveloperTextFragment::new(fragment.text))
-}
-
-fn build_realtime_fragment(
-    _pass: FragmentBuildPass,
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-    params: &TurnContextDiffParams<'_>,
-) -> Option<DeveloperTextFragment> {
-    match previous {
-        Some(previous) => {
-            RealtimeUpdateFragment::diff_from_turn_context_item(previous, next, params)
-        }
-        None => RealtimeUpdateFragment::from_turn_context(next, params),
-    }
-    .map(|fragment| DeveloperTextFragment::new(fragment.text))
-}
-
-fn build_personality_fragment(
-    _pass: FragmentBuildPass,
-    previous: Option<&TurnContextItem>,
-    next: &TurnContext,
-    params: &TurnContextDiffParams<'_>,
-) -> Option<DeveloperTextFragment> {
-    match previous {
-        Some(previous) => {
-            PersonalityUpdateFragment::diff_from_turn_context_item(previous, next, params)
-        }
-        None => PersonalityUpdateFragment::from_turn_context(next, params),
-    }
-    .map(|fragment| DeveloperTextFragment::new(fragment.text))
-}
+// TurnContextDiffFragment uses static constructors returning `Self`, which are
+// not object-safe for `dyn` dispatch. This typed registration adapter preserves
+// "register a fragment type once" ergonomics while keeping fragment behavior in
+// the trait implementations.
 
 pub(super) fn build_registered_developer_fragments(
     pass: FragmentBuildPass,
@@ -481,6 +435,6 @@ pub(super) fn build_registered_developer_fragments(
 ) -> Vec<DeveloperTextFragment> {
     REGISTERED_DEVELOPER_FRAGMENT_BUILDERS
         .iter()
-        .filter_map(|builder| builder(pass, previous, next, params))
+        .filter_map(|registration| registration.build(pass, previous, next, params))
         .collect()
 }
