@@ -27,7 +27,7 @@ where
 {
     let fragment = match pass {
         FragmentBuildPass::InitialContext => F::from_turn_context(turn_context, params),
-        FragmentBuildPass::SettingsUpdate => match previous {
+        FragmentBuildPass::TurnDiff => match previous {
             Some(previous) => F::diff_from_turn_context_item(previous, turn_context, params),
             None => F::from_turn_context(turn_context, params),
         },

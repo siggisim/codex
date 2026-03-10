@@ -25,7 +25,7 @@ use std::marker::PhantomData;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FragmentBuildPass {
     InitialContext,
-    SettingsUpdate,
+    TurnDiff,
 }
 
 /// Shared adapter for turn-state fragment registries across both envelopes.
@@ -170,12 +170,8 @@ pub(crate) fn build_settings_update_items(
     params: &TurnContextDiffParams<'_>,
 ) -> Vec<ResponseItem> {
     let mut developer_envelope = DeveloperEnvelopeBuilder::default();
-    let fragments = build_turn_state_envelope_fragments(
-        FragmentBuildPass::SettingsUpdate,
-        previous,
-        next,
-        params,
-    );
+    let fragments =
+        build_turn_state_envelope_fragments(FragmentBuildPass::TurnDiff, previous, next, params);
     for fragment in fragments.developer {
         developer_envelope.push(fragment);
     }
