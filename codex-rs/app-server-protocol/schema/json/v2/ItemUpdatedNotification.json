@@ -63,120 +63,6 @@
       ],
       "type": "object"
     },
-    "CodexErrorInfo": {
-      "description": "This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.",
-      "oneOf": [
-        {
-          "enum": [
-            "contextWindowExceeded",
-            "usageLimitExceeded",
-            "serverOverloaded",
-            "internalServerError",
-            "unauthorized",
-            "badRequest",
-            "threadRollbackFailed",
-            "sandboxError",
-            "other"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "httpConnectionFailed": {
-              "properties": {
-                "httpStatusCode": {
-                  "format": "uint16",
-                  "minimum": 0.0,
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                }
-              },
-              "type": "object"
-            }
-          },
-          "required": [
-            "httpConnectionFailed"
-          ],
-          "title": "HttpConnectionFailedCodexErrorInfo",
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Failed to connect to the response SSE stream.",
-          "properties": {
-            "responseStreamConnectionFailed": {
-              "properties": {
-                "httpStatusCode": {
-                  "format": "uint16",
-                  "minimum": 0.0,
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                }
-              },
-              "type": "object"
-            }
-          },
-          "required": [
-            "responseStreamConnectionFailed"
-          ],
-          "title": "ResponseStreamConnectionFailedCodexErrorInfo",
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The response SSE stream disconnected in the middle of a turn before completion.",
-          "properties": {
-            "responseStreamDisconnected": {
-              "properties": {
-                "httpStatusCode": {
-                  "format": "uint16",
-                  "minimum": 0.0,
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                }
-              },
-              "type": "object"
-            }
-          },
-          "required": [
-            "responseStreamDisconnected"
-          ],
-          "title": "ResponseStreamDisconnectedCodexErrorInfo",
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Reached the retry limit for responses.",
-          "properties": {
-            "responseTooManyFailedAttempts": {
-              "properties": {
-                "httpStatusCode": {
-                  "format": "uint16",
-                  "minimum": 0.0,
-                  "type": [
-                    "integer",
-                    "null"
-                  ]
-                }
-              },
-              "type": "object"
-            }
-          },
-          "required": [
-            "responseTooManyFailedAttempts"
-          ],
-          "title": "ResponseTooManyFailedAttemptsCodexErrorInfo",
-          "type": "object"
-        }
-      ]
-    },
     "CollabAgentState": {
       "properties": {
         "message": {
@@ -1227,77 +1113,6 @@
         }
       ]
     },
-    "Turn": {
-      "properties": {
-        "error": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TurnError"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Only populated when the Turn's status is failed."
-        },
-        "id": {
-          "type": "string"
-        },
-        "items": {
-          "description": "Only populated on a `thread/resume` or `thread/fork` response. For all other responses and notifications returning a Turn, the items field will be an empty list.",
-          "items": {
-            "$ref": "#/definitions/ThreadItem"
-          },
-          "type": "array"
-        },
-        "status": {
-          "$ref": "#/definitions/TurnStatus"
-        }
-      },
-      "required": [
-        "id",
-        "items",
-        "status"
-      ],
-      "type": "object"
-    },
-    "TurnError": {
-      "properties": {
-        "additionalDetails": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "codexErrorInfo": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/CodexErrorInfo"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "message"
-      ],
-      "type": "object"
-    },
-    "TurnStatus": {
-      "enum": [
-        "completed",
-        "interrupted",
-        "failed",
-        "inProgress"
-      ],
-      "type": "string"
-    },
     "UserInput": {
       "oneOf": [
         {
@@ -1521,17 +1336,21 @@
     }
   },
   "properties": {
+    "item": {
+      "$ref": "#/definitions/ThreadItem"
+    },
     "threadId": {
       "type": "string"
     },
-    "turn": {
-      "$ref": "#/definitions/Turn"
+    "turnId": {
+      "type": "string"
     }
   },
   "required": [
+    "item",
     "threadId",
-    "turn"
+    "turnId"
   ],
-  "title": "TurnCompletedNotification",
+  "title": "ItemUpdatedNotification",
   "type": "object"
 }
