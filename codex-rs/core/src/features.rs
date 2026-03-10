@@ -138,6 +138,8 @@ pub enum Feature {
     EnableRequestCompression,
     /// Enable collab tools.
     Collab,
+    /// Deliver inbound agent messages via a synthetic function-call inbox envelope.
+    AgentFunctionCallInbox,
     /// Enable apps.
     Apps,
     /// Enable plugins.
@@ -694,6 +696,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::AgentFunctionCallInbox,
+        key: "agent_function_call_inbox",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::Apps,
         key: "apps",
         stage: Stage::Experimental {
@@ -1010,5 +1018,18 @@ mod tests {
 
         let chatgpt_auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
         assert!(features.apps_enabled_for_auth(Some(&chatgpt_auth)));
+    }
+
+    #[test]
+    fn agent_function_call_inbox_is_under_development() {
+        assert_eq!(
+            Feature::AgentFunctionCallInbox.stage(),
+            Stage::UnderDevelopment
+        );
+        assert_eq!(Feature::AgentFunctionCallInbox.default_enabled(), false);
+        assert_eq!(
+            feature_for_key("agent_function_call_inbox"),
+            Some(Feature::AgentFunctionCallInbox)
+        );
     }
 }
