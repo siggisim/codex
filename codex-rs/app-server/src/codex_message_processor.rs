@@ -210,6 +210,7 @@ use codex_core::features::FEATURES;
 use codex_core::features::Feature;
 use codex_core::features::Stage;
 use codex_core::find_archived_thread_path_by_id_str;
+use codex_core::find_or_unarchive_thread_path_by_id_str;
 use codex_core::find_thread_name_by_id;
 use codex_core::find_thread_names_by_ids;
 use codex_core::find_thread_path_by_id_str;
@@ -3402,7 +3403,7 @@ impl CodexMessageProcessor {
                 if path.exists() {
                     path
                 } else {
-                    match find_thread_path_by_id_str(
+                    match find_or_unarchive_thread_path_by_id_str(
                         &self.config.codex_home,
                         &existing_thread_id.to_string(),
                     )
@@ -3428,7 +3429,7 @@ impl CodexMessageProcessor {
                     }
                 }
             } else {
-                match find_thread_path_by_id_str(
+                match find_or_unarchive_thread_path_by_id_str(
                     &self.config.codex_home,
                     &existing_thread_id.to_string(),
                 )
@@ -3585,7 +3586,7 @@ impl CodexMessageProcessor {
                 }
             };
 
-            match find_thread_path_by_id_str(
+            match find_or_unarchive_thread_path_by_id_str(
                 &self.config.codex_home,
                 &existing_thread_id.to_string(),
             )
