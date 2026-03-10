@@ -17,7 +17,8 @@ When adding new model-visible context:
 3. Set the fragment `type Role` to the correct developer or contextual-user role.
 4. If it is a contextual-user fragment, wrap content with shared marker helpers/constants from `model_visible_context`.
 5. If the fragment is derived from `TurnContext` and participates in turn-to-turn diffing, also implement `TurnContextDiffFragment`.
-6. Push the fragment through the shared envelope builders in initial-context or settings-update assembly.
+6. Register it in the turn-state fragment registries (`context_manager/updates/developer_update_fragments.rs` and `context_manager/updates/contextual_user_update_fragments.rs`) so both initial-context and settings-update paths iterate it.
+7. Push the resulting fragments through the shared envelope builders.
 
 Do not hand-build developer or contextual-user `ResponseItem`s in new code unless there is a strong reason to bypass the fragment path.
 

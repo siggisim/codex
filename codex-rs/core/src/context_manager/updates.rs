@@ -1,26 +1,32 @@
+mod contextual_user_update_fragments;
 mod developer_update_fragments;
 
 use crate::codex::TurnContext;
-use crate::environment_context::EnvironmentContext;
-use crate::instructions::AgentsMdInstructions;
 use crate::model_visible_context::ContextualUserContextRole;
 use crate::model_visible_context::ContextualUserTextFragment;
 use crate::model_visible_context::DeveloperContextRole;
+use crate::model_visible_context::DeveloperTextFragment;
 use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::model_visible_context::ModelVisibleContextRole;
-use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::TurnContextItem;
 use std::marker::PhantomData;
 
-// Keep fragment-specific diff/render logic in
-// `updates/developer_update_fragments.rs` so this file can focus on shared
-// envelope wiring and message assembly.
-pub(crate) use developer_update_fragments::ModelInstructionsUpdateFragment;
-pub(crate) use developer_update_fragments::RealtimeUpdateFragment;
-pub(crate) use developer_update_fragments::personality_message_for;
+// Keep fragment-specific diff/render logic in the sibling `*_fragments` modules
+// so this file can focus on shared envelope wiring and message assembly.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FragmentBuildPass {
+    InitialContext,
+    SettingsUpdate,
+}
+
+pub(crate) struct TurnStateEnvelopeFragments {
+    pub(crate) developer: Vec<DeveloperTextFragment>,
+    pub(crate) contextual_user: Vec<ContextualUserTextFragment>,
+}
 
 // Adjacent ContentItems in a single message are effectively concatenated in
 // the model-visible token stream, so we inject an explicit separator between
@@ -115,35 +121,41 @@ fn build_message<R: ModelVisibleContextRole>(content: Vec<ContentItem>) -> Optio
     })
 }
 
+pub(crate) fn build_turn_state_envelope_fragments(
+    pass: FragmentBuildPass,
+    previous: Option<&TurnContextItem>,
+    next: &TurnContext,
+    params: &TurnContextDiffParams<'_>,
+) -> TurnStateEnvelopeFragments {
+    TurnStateEnvelopeFragments {
+        developer: developer_update_fragments::build_registered_developer_fragments(
+            pass, previous, next, params,
+        ),
+        contextual_user:
+            contextual_user_update_fragments::build_registered_contextual_user_fragments(
+                pass, previous, next, params,
+            ),
+    }
+}
+
 pub(crate) fn build_settings_update_items(
     previous: Option<&TurnContextItem>,
     next: &TurnContext,
     params: &TurnContextDiffParams<'_>,
 ) -> Vec<ResponseItem> {
     let mut developer_envelope = DeveloperEnvelopeBuilder::default();
-    for fragment in
-        developer_update_fragments::build_developer_update_fragments(previous, next, params)
-    {
+    let fragments = build_turn_state_envelope_fragments(
+        FragmentBuildPass::SettingsUpdate,
+        previous,
+        next,
+        params,
+    );
+    for fragment in fragments.developer {
         developer_envelope.push(fragment);
     }
 
     let mut contextual_user_envelope = ContextualUserEnvelopeBuilder::default();
-    for fragment in [
-        // Add new contextual-user diff fragments here.
-        previous
-            .and_then(|previous| {
-                AgentsMdInstructions::diff_from_turn_context_item(previous, next, params)
-            })
-            .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
-        previous
-            .and_then(|previous| {
-                EnvironmentContext::diff_from_turn_context_item(previous, next, params)
-            })
-            .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    for fragment in fragments.contextual_user {
         contextual_user_envelope.push_fragment(fragment);
     }
 

@@ -41,6 +41,7 @@ In the codex-rs folder where the rust code lives:
 - Use the contextual-user envelope for user-role contextual state or runtime markers such as AGENTS instructions, plugin instructions, environment context, skills, and shell-command markers. Contextual-user fragments must provide stable markers so history parsing treats them as contextual state rather than user intent.
 - Use `<environment_context>` specifically for environment facts derived from `TurnContext` that may need turn-to-turn diffs (`cwd`, `shell`, optional `current_date`, optional `timezone`, optional network allow/deny domain summaries). Do not put policy text, plugin/skill listings, or other guidance into `<environment_context>`; those should use dedicated fragments.
 - Fragments derived from `TurnContext` and diffed against persisted turn state should implement `TurnContextDiffFragment` so current-state extraction, diffing, and rendering live together.
+- Register new turn-state fragments in the fragment registry lists used by both initial-context and settings-update assembly (`context_manager/updates/*_fragments.rs`) so they are discovered by iteration, not ad hoc wiring.
 - Do not inject raw strings directly into the initial-context or settings-update builders, and do not call fragment wrapping helpers ad hoc from new code.
 
 Run `just fmt` (in `codex-rs` directory) automatically after you have finished making Rust code changes; do not ask for approval to run it. Additionally, run the tests:

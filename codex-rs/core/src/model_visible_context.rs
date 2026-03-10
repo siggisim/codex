@@ -159,6 +159,7 @@ pub(crate) struct TurnContextDiffParams<'a> {
     pub(crate) previous_turn_settings: Option<&'a PreviousTurnSettings>,
     pub(crate) exec_policy: &'a Policy,
     pub(crate) personality_feature_enabled: bool,
+    pub(crate) base_instructions: Option<&'a str>,
 }
 
 impl<'a> TurnContextDiffParams<'a> {
@@ -167,12 +168,14 @@ impl<'a> TurnContextDiffParams<'a> {
         previous_turn_settings: Option<&'a PreviousTurnSettings>,
         exec_policy: &'a Policy,
         personality_feature_enabled: bool,
+        base_instructions: Option<&'a str>,
     ) -> Self {
         Self {
             shell,
             previous_turn_settings,
             exec_policy,
             personality_feature_enabled,
+            base_instructions,
         }
     }
 }

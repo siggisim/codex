@@ -164,7 +164,6 @@ use crate::config::types::McpServerConfig;
 use crate::config::types::ShellEnvironmentPolicy;
 use crate::context_manager::ContextManager;
 use crate::context_manager::TotalTokenUsageBreakdown;
-use crate::environment_context::EnvironmentContext;
 use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
 #[cfg(test)]
@@ -172,7 +171,6 @@ use crate::exec::StreamOutput;
 use crate::model_visible_context::ContextualUserTextFragment;
 use crate::model_visible_context::DeveloperTextFragment;
 use crate::model_visible_context::ModelVisibleContextFragment;
-use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
 use codex_config::CONFIG_TOML_FILE;
 
@@ -204,7 +202,6 @@ use crate::feedback_tags;
 use crate::file_watcher::FileWatcher;
 use crate::file_watcher::FileWatcherEvent;
 use crate::git_info::get_git_repo_root;
-use crate::instructions::AgentsMdInstructions;
 use crate::mcp::CODEX_APPS_MCP_SERVER_NAME;
 use crate::mcp::McpManager;
 use crate::mcp::auth::compute_auth_statuses;
@@ -320,12 +317,8 @@ use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::CustomDeveloperInstructions;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::models::developer_collaboration_mode_text;
-use codex_protocol::models::developer_permissions_text;
-use codex_protocol::models::developer_personality_spec_text;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::InitialHistory;
@@ -2499,6 +2492,7 @@ impl Session {
             previous_turn_settings.as_ref(),
             exec_policy.as_ref(),
             self.features.enabled(Feature::Personality),
+            None,
         );
         crate::context_manager::updates::build_settings_update_items(
             reference_context_item,
@@ -3357,12 +3351,11 @@ impl Session {
             crate::context_manager::updates::DeveloperEnvelopeBuilder::default();
         let mut contextual_user_envelope =
             crate::context_manager::updates::ContextualUserEnvelopeBuilder::default();
-        let (reference_context_item, previous_turn_settings, collaboration_mode, base_instructions) = {
+        let (reference_context_item, previous_turn_settings, base_instructions) = {
             let state = self.state.lock().await;
             (
                 state.reference_context_item(),
                 state.previous_turn_settings(),
-                state.session_configuration.collaboration_mode.clone(),
                 state.session_configuration.base_instructions.clone(),
             )
         };
@@ -3373,26 +3366,17 @@ impl Session {
             previous_turn_settings.as_ref(),
             exec_policy.as_ref(),
             self.features.enabled(Feature::Personality),
+            Some(base_instructions.as_str()),
         );
-        for fragment in [
-            <crate::context_manager::updates::ModelInstructionsUpdateFragment as TurnContextDiffFragment>::from_turn_context(turn_context, &diff_context)
-                .map(|fragment| DeveloperTextFragment::new(fragment.render_text())),
-            Some(DeveloperTextFragment::new(developer_permissions_text(
-                turn_context.sandbox_policy.get(),
-                turn_context.approval_policy.value(),
-                turn_context.features.enabled(Feature::GuardianApproval),
-                exec_policy.as_ref(),
-                &turn_context.cwd,
-                turn_context.features.enabled(Feature::RequestPermissions),
-            ))),
-        ]
-        .into_iter()
-        .flatten()
-        {
+        let turn_state_fragments =
+            crate::context_manager::updates::build_turn_state_envelope_fragments(
+                crate::context_manager::updates::FragmentBuildPass::InitialContext,
+                reference_context_item.as_ref(),
+                turn_context,
+                &diff_context,
+            );
+        for fragment in turn_state_fragments.developer {
             developer_envelope.push(fragment);
-        }
-        if let Some(developer_instructions) = turn_context.developer_instructions.as_deref() {
-            developer_envelope.push(CustomDeveloperInstructions::new(developer_instructions));
         }
         let memory_prompt = if turn_context.features.enabled(Feature::MemoryTool)
             && turn_context.config.memories.use_memories
@@ -3401,30 +3385,8 @@ impl Session {
         } else {
             None
         };
-        let personality_message = if self.features.enabled(Feature::Personality) {
-            turn_context.personality.and_then(|personality| {
-                let model_info = turn_context.model_info.clone();
-                let has_baked_personality = model_info.supports_personality()
-                    && base_instructions == model_info.get_model_instructions(Some(personality));
-                if has_baked_personality {
-                    return None;
-                }
-                crate::context_manager::updates::personality_message_for(&model_info, personality)
-                    .map(developer_personality_spec_text)
-            })
-        } else {
-            None
-        };
-        let realtime_message = match reference_context_item.as_ref() {
-            Some(previous) => <crate::context_manager::updates::RealtimeUpdateFragment as TurnContextDiffFragment>::diff_from_turn_context_item(previous, turn_context, &diff_context),
-            None => <crate::context_manager::updates::RealtimeUpdateFragment as TurnContextDiffFragment>::from_turn_context(turn_context, &diff_context),
-        }
-        .map(|fragment| DeveloperTextFragment::new(fragment.render_text()));
         for fragment in [
             memory_prompt.map(DeveloperTextFragment::new),
-            developer_collaboration_mode_text(&collaboration_mode).map(DeveloperTextFragment::new),
-            realtime_message,
-            personality_message.map(DeveloperTextFragment::new),
             turn_context
                 .features
                 .enabled(Feature::Apps)
@@ -3450,24 +3412,12 @@ impl Session {
             .services
             .plugins_manager
             .plugins_for_config(&turn_context.config);
-        for fragment in [
-            <AgentsMdInstructions as TurnContextDiffFragment>::from_turn_context(
-                turn_context,
-                &diff_context,
-            )
-            .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
-            render_plugin_instructions(loaded_plugins.capability_summaries())
-                .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
-            <EnvironmentContext as TurnContextDiffFragment>::from_turn_context(
-                turn_context,
-                &diff_context,
-            )
-            .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
-        ]
-        .into_iter()
-        .flatten()
-        {
+        for fragment in turn_state_fragments.contextual_user {
             contextual_user_envelope.push_fragment(fragment);
+        }
+        if let Some(fragment) = render_plugin_instructions(loaded_plugins.capability_summaries()) {
+            contextual_user_envelope
+                .push_fragment(ContextualUserTextFragment::new(fragment.render_text()));
         }
         let subagents = self
             .services
