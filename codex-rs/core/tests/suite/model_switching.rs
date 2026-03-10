@@ -115,6 +115,7 @@ async fn model_change_appends_model_instructions_developer_message() -> Result<(
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
+            approval_review_policy: None,
             sandbox_policy: None,
             windows_sandbox_level: None,
             model: Some(next_model.to_string()),
@@ -209,6 +210,7 @@ async fn model_and_personality_change_only_appends_model_instructions() -> Resul
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
+            approval_review_policy: None,
             sandbox_policy: None,
             windows_sandbox_level: None,
             model: Some(next_model.to_string()),
@@ -796,6 +798,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
+            approval_review_policy: None,
             sandbox_policy: None,
             windows_sandbox_level: None,
             model: Some(smaller_model_slug.to_string()),
