@@ -440,6 +440,8 @@ mod tests {
 
     use super::*;
     use crate::codex::make_session_and_context;
+    use crate::model_visible_context::ContextualUserTextFragment;
+    use crate::model_visible_context::ModelVisibleContextFragment;
     use codex_protocol::models::ContentItem;
     use codex_protocol::models::LocalShellAction;
     use codex_protocol::models::LocalShellExecAction;
@@ -497,12 +499,10 @@ mod tests {
             .await;
         session
             .record_into_history(
-                &[
-                    crate::contextual_user_message::ENVIRONMENT_CONTEXT_FRAGMENT.into_message(
-                        "<environment_context>\n<cwd>/tmp</cwd>\n</environment_context>"
-                            .to_string(),
-                    ),
-                ],
+                &[ContextualUserTextFragment::new(
+                    "<environment_context>\n<cwd>/tmp</cwd>\n</environment_context>",
+                )
+                .into_message()],
                 &turn_context,
             )
             .await;

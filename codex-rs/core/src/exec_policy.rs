@@ -538,9 +538,10 @@ pub fn render_decision_for_unmatched_command(
                 }
                 SandboxPolicy::ReadOnly { .. } | SandboxPolicy::WorkspaceWrite { .. } => {
                     // In restricted sandboxes (ReadOnly/WorkspaceWrite), do not prompt for
-                    // non‑escalated, non‑dangerous commands — let the sandbox enforce
-                    // restrictions (e.g., block network/write) without a user prompt.
-                    if sandbox_permissions.requires_escalated_permissions() {
+                    // non‑permission-expanding, non‑dangerous commands — let the sandbox enforce
+                    // default restrictions. Explicit permission requests (either full escalation
+                    // or additional sandbox permissions) always require approval.
+                    if sandbox_permissions.requires_additional_permissions() {
                         Decision::Prompt
                     } else {
                         Decision::Allow
@@ -555,7 +556,7 @@ pub fn render_decision_for_unmatched_command(
                 Decision::Allow
             }
             SandboxPolicy::ReadOnly { .. } | SandboxPolicy::WorkspaceWrite { .. } => {
-                if sandbox_permissions.requires_escalated_permissions() {
+                if sandbox_permissions.requires_additional_permissions() {
                     Decision::Prompt
                 } else {
                     Decision::Allow
@@ -1576,6 +1577,38 @@ prefix_rule(pattern=["git"], decision="prompt")
                 &SandboxPolicy::new_read_only_policy(),
                 &command,
                 SandboxPermissions::RequireEscalated,
+                false,
+            )
+        );
+
+        assert_eq!(
+            Decision::Prompt,
+            render_decision_for_unmatched_command(
+                AskForApproval::Reject(RejectConfig {
+                    sandbox_approval: false,
+                    rules: false,
+                    request_permissions: false,
+                    mcp_elicitations: false,
+                }),
+                &SandboxPolicy::new_read_only_policy(),
+                &command,
+                SandboxPermissions::WithAdditionalPermissions,
+                false,
+            )
+        );
+    }
+
+    #[test]
+    fn unmatched_on_request_policy_prompts_for_restricted_sandbox_additional_permissions() {
+        let command = vec!["madeup-cmd".to_string()];
+
+        assert_eq!(
+            Decision::Prompt,
+            render_decision_for_unmatched_command(
+                AskForApproval::OnRequest,
+                &SandboxPolicy::new_read_only_policy(),
+                &command,
+                SandboxPermissions::WithAdditionalPermissions,
                 false,
             )
         );

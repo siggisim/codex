@@ -5553,8 +5553,8 @@ pub(crate) async fn run_turn(
                 break;
             }
             if let Some(additional_context) = session_start_outcome.additional_context {
-                let developer_message: ResponseItem =
-                    DeveloperInstructions::new(additional_context).into();
+                let developer_message =
+                    DeveloperTextFragment::new(additional_context).into_message();
                 sess.record_conversation_items(
                     &turn_context,
                     std::slice::from_ref(&developer_message),
@@ -5600,7 +5600,8 @@ pub(crate) async fn run_turn(
                 .for_prompt(&turn_context.model_info.input_modalities)
         };
         if let Some(stop_hook_message) = pending_stop_hook_message.take() {
-            sampling_request_input.push(DeveloperInstructions::new(stop_hook_message).into());
+            sampling_request_input
+                .push(DeveloperTextFragment::new(stop_hook_message).into_message());
         }
 
         let sampling_request_input_messages = sampling_request_input
