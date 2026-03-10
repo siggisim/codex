@@ -140,8 +140,7 @@ impl Approvable<ApplyPatchRequest> for ApplyPatchRuntime {
         let changes = req.changes.clone();
         Box::pin(async move {
             if routes_approval_to_guardian(turn) {
-                let action =
-                    ApplyPatchRuntime::build_guardian_review_request(req, ctx.call_id.as_ref());
+                let action = ApplyPatchRuntime::build_guardian_review_request(req, ctx.call_id);
                 return review_approval_request(session, turn, action, retry_reason).await;
             }
             if req.permissions_preapproved && retry_reason.is_none() {
@@ -268,13 +267,16 @@ mod tests {
             codex_exe: None,
         };
 
-        let guardian_request = ApplyPatchRuntime::build_guardian_review_request(&request);
+        let guardian_request =
+            ApplyPatchRuntime::build_guardian_review_request(&request, "call-123");
 
         assert_eq!(
             guardian_request,
             GuardianApprovalRequest::ApplyPatch {
+                id: "call-123".to_string(),
                 cwd: expected_cwd,
                 files: request.file_paths,
+                changes: request.changes,
                 change_count: 1usize,
                 patch: expected_patch,
             }
