@@ -140,6 +140,10 @@ pub enum Feature {
     Collab,
     /// Deliver inbound agent messages via a synthetic function-call inbox envelope.
     AgentFunctionCallInbox,
+    /// Enable prepending agent-specific developer instructions for agent sessions.
+    AgentPromptInjection,
+    /// Enable watchdog spawning and watchdog-only agent tools.
+    AgentWatchdog,
     /// Enable apps.
     Apps,
     /// Enable plugins.
@@ -702,6 +706,18 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::AgentPromptInjection,
+        key: "agent_prompt_injection",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::AgentWatchdog,
+        key: "agent_watchdog",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::Apps,
         key: "apps",
         stage: Stage::Experimental {
@@ -1030,6 +1046,18 @@ mod tests {
         assert_eq!(
             feature_for_key("agent_function_call_inbox"),
             Some(Feature::AgentFunctionCallInbox)
+        );
+    }
+
+    #[test]
+    fn agent_prompt_and_watchdog_features_use_canonical_keys() {
+        assert_eq!(
+            feature_for_key("agent_prompt_injection"),
+            Some(Feature::AgentPromptInjection)
+        );
+        assert_eq!(
+            feature_for_key("agent_watchdog"),
+            Some(Feature::AgentWatchdog)
         );
     }
 }
