@@ -976,36 +976,17 @@ mod tests {
     }
 
     #[test]
-    fn guardian_approval_alias_maps_to_smart_approvals() {
-        assert_eq!(
-            feature_for_key("guardian_approval"),
-            Some(Feature::GuardianApproval)
-        );
+    fn smart_approvals_is_the_only_feature_key() {
         assert_eq!(
             feature_for_key("smart_approvals"),
             Some(Feature::GuardianApproval)
         );
-        assert_eq!(canonical_feature_for_key("guardian_approval"), None);
+        assert_eq!(feature_for_key("guardian_approval"), None);
         assert_eq!(
             canonical_feature_for_key("smart_approvals"),
             Some(Feature::GuardianApproval)
         );
-    }
-
-    #[test]
-    fn guardian_approval_alias_notice_uses_config_key_path() {
-        let (summary, details) =
-            legacy_usage_notice("guardian_approval", Feature::GuardianApproval);
-        assert_eq!(
-            summary,
-            "`[features].guardian_approval` is deprecated. Use `[features].smart_approvals` instead."
-        );
-        assert_eq!(
-            details,
-            Some(
-                "Enable it with `--enable smart_approvals` or `[features].smart_approvals` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details.".to_string()
-            )
-        );
+        assert_eq!(canonical_feature_for_key("guardian_approval"), None);
     }
 
     #[test]
