@@ -169,12 +169,11 @@ use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
 #[cfg(test)]
 use crate::exec::StreamOutput;
-use crate::model_visible_context::DeveloperContextRole;
+use crate::model_visible_context::ContextualUserTextFragment;
 use crate::model_visible_context::DeveloperTextFragment;
+use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
-use crate::model_visible_context::model_visible_message;
-use crate::model_visible_context::model_visible_response_input_item;
 use codex_config::CONFIG_TOML_FILE;
 
 mod rollout_reconstruction;
@@ -2665,16 +2664,16 @@ impl Session {
         let text = format!("Approved command prefix saved:\n{prefixes}");
 
         if let Some(turn_context) = self.turn_context_for_sub_id(sub_id).await {
-            let message = model_visible_message::<DeveloperContextRole>(text.clone());
+            let message = DeveloperTextFragment::new(text.clone()).into_message();
             self.record_conversation_items(&turn_context, std::slice::from_ref(&message))
                 .await;
             return;
         }
 
         if self
-            .inject_response_items(vec![model_visible_response_input_item::<
-                DeveloperContextRole,
-            >(text)])
+            .inject_response_items(vec![
+                DeveloperTextFragment::new(text).into_response_input_item(),
+            ])
             .await
             .is_err()
         {
@@ -2761,16 +2760,16 @@ impl Session {
         );
 
         if let Some(turn_context) = self.turn_context_for_sub_id(sub_id).await {
-            let message = model_visible_message::<DeveloperContextRole>(text.clone());
+            let message = DeveloperTextFragment::new(text.clone()).into_message();
             self.record_conversation_items(&turn_context, std::slice::from_ref(&message))
                 .await;
             return;
         }
 
         if self
-            .inject_response_items(vec![model_visible_response_input_item::<
-                DeveloperContextRole,
-            >(text)])
+            .inject_response_items(vec![
+                DeveloperTextFragment::new(text).into_response_input_item(),
+            ])
             .await
             .is_err()
         {
@@ -3375,22 +3374,23 @@ impl Session {
             exec_policy.as_ref(),
             self.features.enabled(Feature::Personality),
         );
-        if let Some(model_switch_message) =
-            crate::context_manager::updates::build_model_instructions_update_item(
-                previous_turn_settings.as_ref(),
-                turn_context,
-            )
+        for fragment in [
+            <crate::context_manager::updates::ModelInstructionsUpdateFragment as TurnContextDiffFragment>::from_turn_context(turn_context, &diff_context)
+                .map(|fragment| DeveloperTextFragment::new(fragment.render_text())),
+            Some(DeveloperTextFragment::new(developer_permissions_text(
+                turn_context.sandbox_policy.get(),
+                turn_context.approval_policy.value(),
+                turn_context.features.enabled(Feature::GuardianApproval),
+                exec_policy.as_ref(),
+                &turn_context.cwd,
+                turn_context.features.enabled(Feature::RequestPermissions),
+            ))),
+        ]
+        .into_iter()
+        .flatten()
         {
-            developer_envelope.push(DeveloperTextFragment::new(model_switch_message));
+            developer_envelope.push(fragment);
         }
-        developer_envelope.push(DeveloperTextFragment::new(developer_permissions_text(
-            turn_context.sandbox_policy.get(),
-            turn_context.approval_policy.value(),
-            turn_context.features.enabled(Feature::GuardianApproval),
-            exec_policy.as_ref(),
-            &turn_context.cwd,
-            turn_context.features.enabled(Feature::RequestPermissions),
-        )));
         if let Some(developer_instructions) = turn_context.developer_instructions.as_deref() {
             developer_envelope.push(CustomDeveloperInstructions::new(developer_instructions));
         }
@@ -3415,19 +3415,21 @@ impl Session {
         } else {
             None
         };
-        for developer_text in [
-            memory_prompt,
-            developer_collaboration_mode_text(&collaboration_mode),
-            crate::context_manager::updates::build_realtime_update_item(
-                reference_context_item.as_ref(),
-                previous_turn_settings.as_ref(),
-                turn_context,
-            ),
-            personality_message,
+        let realtime_message = match reference_context_item.as_ref() {
+            Some(previous) => <crate::context_manager::updates::RealtimeUpdateFragment as TurnContextDiffFragment>::diff_from_turn_context_item(previous, turn_context, &diff_context),
+            None => <crate::context_manager::updates::RealtimeUpdateFragment as TurnContextDiffFragment>::from_turn_context(turn_context, &diff_context),
+        }
+        .map(|fragment| DeveloperTextFragment::new(fragment.render_text()));
+        for fragment in [
+            memory_prompt.map(DeveloperTextFragment::new),
+            developer_collaboration_mode_text(&collaboration_mode).map(DeveloperTextFragment::new),
+            realtime_message,
+            personality_message.map(DeveloperTextFragment::new),
             turn_context
                 .features
                 .enabled(Feature::Apps)
-                .then(render_apps_section),
+                .then(render_apps_section)
+                .map(DeveloperTextFragment::new),
             turn_context
                 .features
                 .enabled(Feature::CodexGitCommit)
@@ -3436,43 +3438,42 @@ impl Session {
                         turn_context.config.commit_attribution.as_deref(),
                     )
                 })
-                .flatten(),
+                .flatten()
+                .map(DeveloperTextFragment::new),
         ]
         .into_iter()
         .flatten()
         {
-            developer_envelope.push(DeveloperTextFragment::new(developer_text));
-        }
-        if let Some(user_instructions) =
-            <AgentsMdInstructions as TurnContextDiffFragment>::from_turn_context(
-                turn_context,
-                &diff_context,
-            )
-        {
-            contextual_user_envelope.push_fragment(user_instructions);
+            developer_envelope.push(fragment);
         }
         let loaded_plugins = self
             .services
             .plugins_manager
             .plugins_for_config(&turn_context.config);
-        if let Some(plugin_instructions) =
+        for fragment in [
+            <AgentsMdInstructions as TurnContextDiffFragment>::from_turn_context(
+                turn_context,
+                &diff_context,
+            )
+            .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
             render_plugin_instructions(loaded_plugins.capability_summaries())
+                .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
+            <EnvironmentContext as TurnContextDiffFragment>::from_turn_context(
+                turn_context,
+                &diff_context,
+            )
+            .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
+        ]
+        .into_iter()
+        .flatten()
         {
-            contextual_user_envelope.push_fragment(plugin_instructions);
+            contextual_user_envelope.push_fragment(fragment);
         }
         let subagents = self
             .services
             .agent_control
             .format_environment_context_subagents(self.conversation_id)
             .await;
-        if let Some(environment_context) =
-            <EnvironmentContext as TurnContextDiffFragment>::from_turn_context(
-                turn_context,
-                &diff_context,
-            )
-        {
-            contextual_user_envelope.push_fragment(environment_context);
-        }
         if let Some(subagent_roster) = crate::session_prefix::SubagentRosterContext::new(subagents)
         {
             developer_envelope.push(subagent_roster);

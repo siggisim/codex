@@ -144,6 +144,16 @@ impl DeveloperTextFragment {
     }
 }
 
+pub(crate) struct ContextualUserTextFragment {
+    text: String,
+}
+
+impl ContextualUserTextFragment {
+    pub(crate) fn new(text: impl Into<String>) -> Self {
+        Self { text: text.into() }
+    }
+}
+
 pub(crate) struct TurnContextDiffParams<'a> {
     pub(crate) shell: &'a Shell,
     pub(crate) previous_turn_settings: Option<&'a PreviousTurnSettings>,
@@ -244,6 +254,14 @@ impl ModelVisibleContextFragment for CustomDeveloperInstructions {
 
 impl ModelVisibleContextFragment for DeveloperTextFragment {
     type Role = DeveloperContextRole;
+
+    fn render_text(&self) -> String {
+        self.text.clone()
+    }
+}
+
+impl ModelVisibleContextFragment for ContextualUserTextFragment {
+    type Role = ContextualUserContextRole;
 
     fn render_text(&self) -> String {
         self.text.clone()

@@ -2,9 +2,10 @@ mod developer_update_fragments;
 
 use crate::codex::TurnContext;
 use crate::environment_context::EnvironmentContext;
+use crate::instructions::AgentsMdInstructions;
 use crate::model_visible_context::ContextualUserContextRole;
+use crate::model_visible_context::ContextualUserTextFragment;
 use crate::model_visible_context::DeveloperContextRole;
-use crate::model_visible_context::DeveloperTextFragment;
 use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::model_visible_context::ModelVisibleContextRole;
 use crate::model_visible_context::TurnContextDiffFragment;
@@ -17,8 +18,8 @@ use std::marker::PhantomData;
 // Keep fragment-specific diff/render logic in
 // `updates/developer_update_fragments.rs` so this file can focus on shared
 // envelope wiring and message assembly.
-pub(crate) use developer_update_fragments::build_model_instructions_update_item;
-pub(crate) use developer_update_fragments::build_realtime_update_item;
+pub(crate) use developer_update_fragments::ModelInstructionsUpdateFragment;
+pub(crate) use developer_update_fragments::RealtimeUpdateFragment;
 pub(crate) use developer_update_fragments::personality_message_for;
 
 // Adjacent ContentItems in a single message are effectively concatenated in
@@ -120,17 +121,25 @@ pub(crate) fn build_settings_update_items(
     params: &TurnContextDiffParams<'_>,
 ) -> Vec<ResponseItem> {
     let mut developer_envelope = DeveloperEnvelopeBuilder::default();
-    for fragment in developer_update_fragments::build_developer_update_texts(previous, next, params)
+    for fragment in
+        developer_update_fragments::build_developer_update_fragments(previous, next, params)
     {
-        developer_envelope.push(DeveloperTextFragment::new(fragment));
+        developer_envelope.push(fragment);
     }
 
     let mut contextual_user_envelope = ContextualUserEnvelopeBuilder::default();
     for fragment in [
         // Add new contextual-user diff fragments here.
-        previous.and_then(|previous| {
-            EnvironmentContext::diff_from_turn_context_item(previous, next, params)
-        }),
+        previous
+            .and_then(|previous| {
+                AgentsMdInstructions::diff_from_turn_context_item(previous, next, params)
+            })
+            .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
+        previous
+            .and_then(|previous| {
+                EnvironmentContext::diff_from_turn_context_item(previous, next, params)
+            })
+            .map(|fragment| ContextualUserTextFragment::new(fragment.render_text())),
     ]
     .into_iter()
     .flatten()

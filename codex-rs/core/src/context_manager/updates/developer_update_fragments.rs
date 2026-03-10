@@ -6,10 +6,10 @@
 //! updates (permissions, collaboration mode, realtime, personality, and model
 //! switch guidance).
 
-use crate::codex::PreviousTurnSettings;
 use crate::codex::TurnContext;
 use crate::features::Feature;
 use crate::model_visible_context::DeveloperContextRole;
+use crate::model_visible_context::DeveloperTextFragment;
 use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
@@ -31,7 +31,8 @@ fn model_instructions_update_text(
     previous_model: Option<&str>,
     turn_context: &TurnContext,
 ) -> Option<String> {
-    if previous_model == Some(turn_context.model_info.slug.as_str()) {
+    let previous_model = previous_model?;
+    if previous_model == turn_context.model_info.slug.as_str() {
         return None;
     }
 
@@ -45,7 +46,7 @@ fn model_instructions_update_text(
     Some(developer_model_switch_text(model_instructions))
 }
 
-struct ModelInstructionsUpdateFragment {
+pub(crate) struct ModelInstructionsUpdateFragment {
     text: String,
 }
 
@@ -80,20 +81,6 @@ impl TurnContextDiffFragment for ModelInstructionsUpdateFragment {
             .map(|text| Self { text })
     }
 }
-
-pub(crate) fn build_model_instructions_update_item(
-    previous_turn_settings: Option<&PreviousTurnSettings>,
-    turn_context: &TurnContext,
-) -> Option<String> {
-    model_instructions_update_text(
-        previous_turn_settings.map(|settings| settings.model.as_str()),
-        turn_context,
-    )
-}
-
-// ---------------------------------------------------------------------------
-// Permissions fragment
-// ---------------------------------------------------------------------------
 
 struct PermissionsUpdateFragment {
     text: String,
@@ -206,20 +193,19 @@ impl TurnContextDiffFragment for CollaborationModeUpdateFragment {
 fn realtime_update_text(
     previous_realtime_active: Option<bool>,
     current_realtime_active: bool,
-    previous_turn_settings: Option<&PreviousTurnSettings>,
+    previous_turn_realtime_active: Option<bool>,
 ) -> Option<String> {
     match (previous_realtime_active, current_realtime_active) {
         (Some(true), false) => Some(developer_realtime_end_text("inactive")),
         (Some(false), true) | (None, true) => Some(developer_realtime_start_text()),
         (Some(true), true) | (Some(false), false) => None,
-        (None, false) => previous_turn_settings
-            .and_then(|settings| settings.realtime_active)
+        (None, false) => previous_turn_realtime_active
             .filter(|realtime_active| *realtime_active)
             .map(|_| developer_realtime_end_text("inactive")),
     }
 }
 
-struct RealtimeUpdateFragment {
+pub(crate) struct RealtimeUpdateFragment {
     text: String,
 }
 
@@ -239,7 +225,9 @@ impl TurnContextDiffFragment for RealtimeUpdateFragment {
         realtime_update_text(
             None,
             turn_context.realtime_active,
-            params.previous_turn_settings,
+            params
+                .previous_turn_settings
+                .and_then(|settings| settings.realtime_active),
         )
         .map(|text| Self { text })
     }
@@ -252,22 +240,12 @@ impl TurnContextDiffFragment for RealtimeUpdateFragment {
         realtime_update_text(
             previous.realtime_active,
             turn_context.realtime_active,
-            params.previous_turn_settings,
+            params
+                .previous_turn_settings
+                .and_then(|settings| settings.realtime_active),
         )
         .map(|text| Self { text })
     }
-}
-
-pub(crate) fn build_realtime_update_item(
-    previous: Option<&TurnContextItem>,
-    previous_turn_settings: Option<&PreviousTurnSettings>,
-    turn_context: &TurnContext,
-) -> Option<String> {
-    realtime_update_text(
-        previous.and_then(|item| item.realtime_active),
-        turn_context.realtime_active,
-        previous_turn_settings,
-    )
 }
 
 // ---------------------------------------------------------------------------
@@ -343,47 +321,47 @@ impl TurnContextDiffFragment for PersonalityUpdateFragment {
 // Fragment list assembly
 // ---------------------------------------------------------------------------
 
-pub(super) fn build_developer_update_texts(
+pub(super) fn build_developer_update_fragments(
     previous: Option<&TurnContextItem>,
     next: &TurnContext,
     params: &TurnContextDiffParams<'_>,
-) -> Vec<String> {
+) -> Vec<DeveloperTextFragment> {
     [
         // Keep model-switch instructions first so model-specific guidance is read before
         // any other context diffs on this turn.
         ModelInstructionsUpdateFragment::from_turn_context(next, params)
-            .map(|fragment| fragment.text),
+            .map(|fragment| DeveloperTextFragment::new(fragment.text)),
         previous
             .and_then(|previous| {
                 PermissionsUpdateFragment::diff_from_turn_context_item(previous, next, params)
             })
-            .map(|fragment| fragment.text),
+            .map(|fragment| DeveloperTextFragment::new(fragment.text)),
         previous
             .and_then(|previous| {
                 CustomDeveloperInstructionsUpdateFragment::diff_from_turn_context_item(
                     previous, next, params,
                 )
             })
-            .map(|fragment| fragment.text),
+            .map(|fragment| DeveloperTextFragment::new(fragment.text)),
         previous
             .and_then(|previous| {
                 CollaborationModeUpdateFragment::diff_from_turn_context_item(previous, next, params)
             })
-            .map(|fragment| fragment.text),
+            .map(|fragment| DeveloperTextFragment::new(fragment.text)),
         match previous {
             Some(previous) => {
                 RealtimeUpdateFragment::diff_from_turn_context_item(previous, next, params)
             }
             None => RealtimeUpdateFragment::from_turn_context(next, params),
         }
-        .map(|fragment| fragment.text),
+        .map(|fragment| DeveloperTextFragment::new(fragment.text)),
         match previous {
             Some(previous) => {
                 PersonalityUpdateFragment::diff_from_turn_context_item(previous, next, params)
             }
             None => PersonalityUpdateFragment::from_turn_context(next, params),
         }
-        .map(|fragment| fragment.text),
+        .map(|fragment| DeveloperTextFragment::new(fragment.text)),
     ]
     .into_iter()
     .flatten()
