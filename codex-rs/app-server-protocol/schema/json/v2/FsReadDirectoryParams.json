@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "List direct child names for a directory.",
+  "properties": {
+    "path": {
+      "description": "Absolute directory path to read.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "title": "FsReadDirectoryParams",
+  "type": "object"
+}

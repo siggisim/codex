@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Read a file from the host filesystem.",
+  "properties": {
+    "path": {
+      "description": "Absolute path to read.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "title": "FsReadFileParams",
+  "type": "object"
+}

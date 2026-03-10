@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "FsWatchEventType": {
+      "description": "Node-style event type reported by `fs/changed`.",
+      "oneOf": [
+        {
+          "description": "File data or metadata changed in place.",
+          "enum": [
+            "change"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Directory entry membership or name changed.",
+          "enum": [
+            "rename"
+          ],
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "description": "Filesystem watch notification emitted for `fs/watch` subscribers.",
+  "properties": {
+    "changedPath": {
+      "description": "File or directory path associated with this event.",
+      "type": "string"
+    },
+    "eventType": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/FsWatchEventType"
+        }
+      ],
+      "description": "Node-style watch event type associated with the change."
+    },
+    "watchId": {
+      "description": "Watch identifier returned by `fs/watch`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "changedPath",
+    "eventType",
+    "watchId"
+  ],
+  "title": "FsChangedNotification",
+  "type": "object"
+}

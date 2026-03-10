@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Copy a file or directory tree on the host filesystem.",
+  "properties": {
+    "destinationPath": {
+      "description": "Absolute destination path.",
+      "type": "string"
+    },
+    "recursive": {
+      "description": "Required for directory copies; ignored for file copies.",
+      "type": "boolean"
+    },
+    "sourcePath": {
+      "description": "Absolute source path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "destinationPath",
+    "sourcePath"
+  ],
+  "title": "FsCopyParams",
+  "type": "object"
+}

@@ -153,6 +153,16 @@ Example with notification opt-out:
 - `command/exec/resize` — resize a running PTY-backed `command/exec` session by `processId`; returns `{}`.
 - `command/exec/terminate` — terminate a running `command/exec` session by `processId`; returns `{}`.
 - `command/exec/outputDelta` — notification emitted for base64-encoded stdout/stderr chunks from a streaming `command/exec` session.
+- `fs/readFile` — read an absolute file path and return `{ dataBase64 }`.
+- `fs/writeFile` — write an absolute file path from base64-encoded `{ dataBase64 }`; returns `{}`.
+- `fs/createDirectory` — create an absolute directory path; `recursive` defaults to `true`.
+- `fs/getMetadata` — return minimal metadata used by current Codex clients for an absolute path: `isDirectory`, `isFile`, `createdAtMs`, and `modifiedAtMs`.
+- `fs/readDirectory` — list direct child entries for an absolute directory path; each entry currently contains only `fileName`, which is just the child name, not a path.
+- `fs/remove` — remove an absolute file or directory tree; `recursive` and `force` default to `true`.
+- `fs/copy` — copy between absolute paths; directory copies require `recursive: true` and ignore unsupported special files such as FIFOs or sockets.
+- `fs/watch` — subscribe this connection to filesystem change notifications for an absolute file or directory path; returns a `watchId` and canonicalized `path`.
+- `fs/unwatch` — stop sending notifications for a prior `fs/watch`; returns `{}`.
+- `fs/changed` — notification emitted when a watched path changes, including the `watchId`, `changedPath`, and a Node-style `eventType` (`change` or `rename`).
 - `model/list` — list available models (set `includeHidden: true` to include entries with `hidden: true`), with reasoning effort options, optional legacy `upgrade` model ids, optional `upgradeInfo` metadata (`model`, `upgradeCopy`, `modelLink`, `migrationMarkdown`), and optional `availabilityNux` metadata.
 - `experimentalFeature/list` — list feature flags with stage metadata (`beta`, `underDevelopment`, `stable`, etc.), enabled/default-enabled state, and cursor pagination. For non-beta flags, `displayName`/`description`/`announcement` are `null`.
 - `collaborationMode/list` — list available collaboration mode presets (experimental, no pagination). This response omits built-in developer instructions; clients should either pass `settings.developer_instructions: null` when setting a mode to use Codex's built-in instructions, or provide their own instructions explicitly.
@@ -709,6 +719,69 @@ Streaming stdin/stdout uses base64 so PTY sessions can carry arbitrary bytes:
 - `command/exec/outputDelta.capReached` is `true` on the final streamed chunk for a stream when `outputBytesCap` truncates that stream; later output on that stream is dropped.
 - `command/exec.params.env` overrides the server-computed environment per key; set a key to `null` to unset an inherited variable.
 - `command/exec/resize` is only supported for PTY-backed `command/exec` sessions.
+
+### Example: Filesystem utilities
+
+These methods are intended to cover the current `codex-apps` host-side filesystem helpers without exposing a full Node `fs.Stats` surface.
+
+All filesystem paths in this section must be absolute.
+
+```json
+{ "method": "fs/createDirectory", "id": 40, "params": {
+    "path": "/tmp/example/nested",
+    "recursive": true
+} }
+{ "id": 40, "result": {} }
+{ "method": "fs/writeFile", "id": 41, "params": {
+    "path": "/tmp/example/nested/note.txt",
+    "dataBase64": "aGVsbG8="
+} }
+{ "id": 41, "result": {} }
+{ "method": "fs/getMetadata", "id": 42, "params": {
+    "path": "/tmp/example/nested/note.txt"
+} }
+{ "id": 42, "result": {
+    "isDirectory": false,
+    "isFile": true,
+    "createdAtMs": 1730910000000,
+    "modifiedAtMs": 1730910000000
+} }
+{ "method": "fs/readFile", "id": 43, "params": {
+    "path": "/tmp/example/nested/note.txt"
+} }
+{ "id": 43, "result": {
+    "dataBase64": "aGVsbG8="
+} }
+```
+
+- `fs/getMetadata` intentionally omits the rest of Node’s `fs.Stats`; current Codex clients only consume `isDirectory`, `isFile`, `createdAtMs`, and `modifiedAtMs`.
+- `fs/createDirectory` defaults `recursive` to `true` when omitted.
+- `fs/remove` defaults both `recursive` and `force` to `true` when omitted.
+- `fs/readFile` always returns base64 bytes via `dataBase64`, and `fs/writeFile` always expects base64 bytes in `dataBase64`.
+- `fs/copy` handles both file copies and directory-tree copies; it requires `recursive: true` when `sourcePath` is a directory and ignores unsupported special files such as FIFOs, sockets, and device nodes when walking a directory tree.
+
+### Example: Filesystem watch
+
+`fs/watch` accepts absolute file or directory paths. File targets are watched by subscribing to their parent directory under the hood so atomic replace/rename flows still emit change notifications for the target file.
+
+```json
+{ "method": "fs/watch", "id": 44, "params": {
+    "path": "/Users/me/project/.git/HEAD"
+} }
+{ "id": 44, "result": {
+    "watchId": "fs-watch-0",
+    "path": "/Users/me/project/.git/HEAD"
+} }
+{ "method": "fs/changed", "params": {
+    "watchId": "fs-watch-0",
+    "changedPath": "/Users/me/project/.git/HEAD",
+    "eventType": "rename"
+} }
+{ "method": "fs/unwatch", "id": 45, "params": {
+    "watchId": "fs-watch-0"
+} }
+{ "id": 45, "result": {} }
+```
 
 ## Events
 

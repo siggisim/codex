@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Start filesystem watch notifications for an absolute path.",
+  "properties": {
+    "path": {
+      "description": "Absolute file or directory path to watch.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "title": "FsWatchParams",
+  "type": "object"
+}
