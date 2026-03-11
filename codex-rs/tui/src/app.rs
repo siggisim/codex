@@ -3902,6 +3902,7 @@ mod tests {
     use crate::app_backtrack::BacktrackSelection;
     use crate::app_backtrack::BacktrackState;
     use crate::app_backtrack::user_count;
+    use crate::bottom_pane::TerminalTitleItem;
     use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
     use crate::chatwidget::tests::set_chatgpt_auth;
     use crate::file_search::FileSearchManager;
@@ -4673,13 +4674,6 @@ mod tests {
 
         app.replace_chat_widget(replacement);
 
-        assert_eq!(
-            app.chat_widget.last_terminal_title,
-            Some("my-project | Ready".to_string())
-        );
-
-        app.refresh_status_surfaces();
-
         assert_eq!(app.chat_widget.last_terminal_title, None);
     }
 
@@ -4690,13 +4684,14 @@ mod tests {
 
         let (mut replacement, _app_event_tx, _rx, _new_op_rx) =
             make_chatwidget_manual_with_sender().await;
-        replacement.last_terminal_title = Some("new-project | Ready".to_string());
+        replacement.setup_terminal_title(vec![TerminalTitleItem::AppName]);
+        replacement.last_terminal_title = Some("codex".to_string());
 
         app.replace_chat_widget(replacement);
 
         assert_eq!(
             app.chat_widget.last_terminal_title,
-            Some("new-project | Ready".to_string())
+            Some("codex".to_string())
         );
     }
 
