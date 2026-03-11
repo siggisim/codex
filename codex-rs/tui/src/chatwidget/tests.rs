@@ -9834,12 +9834,12 @@ async fn terminal_title_status_uses_plain_labels_for_transient_states_when_anima
 }
 
 #[tokio::test]
-async fn default_terminal_title_items_are_project_then_spinner() {
+async fn default_terminal_title_items_are_spinner_then_project() {
     let (chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
 
     assert_eq!(
         chat.configured_terminal_title_items(),
-        vec!["project".to_string(), "spinner".to_string()]
+        vec!["spinner".to_string(), "project".to_string()]
     );
 }
 
@@ -9897,7 +9897,7 @@ async fn default_terminal_title_refreshes_when_spinner_state_changes() {
 
     chat.refresh_terminal_title();
 
-    assert_eq!(chat.last_terminal_title, Some(format!("{project} ⠋")));
+    assert_eq!(chat.last_terminal_title, Some(format!("⠋ {project}")));
 }
 
 #[tokio::test]
