@@ -917,6 +917,22 @@ impl UnauthorizedRecovery {
         !matches!(self.step, UnauthorizedRecoveryStep::Done)
     }
 
+    pub fn mode_name(&self) -> &'static str {
+        match self.mode {
+            UnauthorizedRecoveryMode::Managed => "managed",
+            UnauthorizedRecoveryMode::External => "external",
+        }
+    }
+
+    pub fn step_name(&self) -> &'static str {
+        match self.step {
+            UnauthorizedRecoveryStep::Reload => "reload",
+            UnauthorizedRecoveryStep::RefreshToken => "refresh_token",
+            UnauthorizedRecoveryStep::ExternalRefresh => "external_refresh",
+            UnauthorizedRecoveryStep::Done => "done",
+        }
+    }
+
     pub async fn next(&mut self) -> Result<(), RefreshTokenError> {
         if !self.has_next() {
             return Err(RefreshTokenError::Permanent(RefreshTokenFailedError::new(
@@ -1538,6 +1554,33 @@ mod tests {
         assert!(logout(dir.path(), AuthCredentialsStoreMode::File)?);
         assert!(!auth_file.exists());
         Ok(())
+    }
+
+    #[test]
+    fn unauthorized_recovery_reports_mode_and_step_names() {
+        let dir = tempdir().unwrap();
+        let manager = AuthManager::shared(
+            dir.path().to_path_buf(),
+            false,
+            AuthCredentialsStoreMode::File,
+        );
+        let managed = UnauthorizedRecovery {
+            manager: Arc::clone(&manager),
+            step: UnauthorizedRecoveryStep::Reload,
+            expected_account_id: None,
+            mode: UnauthorizedRecoveryMode::Managed,
+        };
+        assert_eq!(managed.mode_name(), "managed");
+        assert_eq!(managed.step_name(), "reload");
+
+        let external = UnauthorizedRecovery {
+            manager,
+            step: UnauthorizedRecoveryStep::ExternalRefresh,
+            expected_account_id: None,
+            mode: UnauthorizedRecoveryMode::External,
+        };
+        assert_eq!(external.mode_name(), "external");
+        assert_eq!(external.step_name(), "external_refresh");
     }
 
     struct AuthFileParams {

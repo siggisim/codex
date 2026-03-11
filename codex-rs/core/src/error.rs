@@ -292,6 +292,8 @@ pub struct UnexpectedResponseError {
     pub url: Option<String>,
     pub cf_ray: Option<String>,
     pub request_id: Option<String>,
+    pub identity_authorization_error: Option<String>,
+    pub identity_error_code: Option<String>,
 }
 
 const CLOUDFLARE_BLOCKED_MESSAGE: &str =
@@ -346,6 +348,12 @@ impl UnexpectedResponseError {
         if let Some(id) = &self.request_id {
             message.push_str(&format!(", request id: {id}"));
         }
+        if let Some(auth_error) = &self.identity_authorization_error {
+            message.push_str(&format!(", auth error: {auth_error}"));
+        }
+        if let Some(error_code) = &self.identity_error_code {
+            message.push_str(&format!(", auth error code: {error_code}"));
+        }
 
         Some(message)
     }
@@ -367,6 +375,12 @@ impl std::fmt::Display for UnexpectedResponseError {
             }
             if let Some(id) = &self.request_id {
                 message.push_str(&format!(", request id: {id}"));
+            }
+            if let Some(auth_error) = &self.identity_authorization_error {
+                message.push_str(&format!(", auth error: {auth_error}"));
+            }
+            if let Some(error_code) = &self.identity_error_code {
+                message.push_str(&format!(", auth error code: {error_code}"));
             }
             write!(f, "{message}")
         }
@@ -986,6 +1000,8 @@ mod tests {
             url: Some("http://example.com/blocked".to_string()),
             cf_ray: Some("ray-id".to_string()),
             request_id: None,
+            identity_authorization_error: None,
+            identity_error_code: None,
         };
         let status = StatusCode::FORBIDDEN.to_string();
         let url = "http://example.com/blocked";
@@ -1003,6 +1019,8 @@ mod tests {
             url: Some("http://example.com/plain".to_string()),
             cf_ray: None,
             request_id: None,
+            identity_authorization_error: None,
+            identity_error_code: None,
         };
         let status = StatusCode::FORBIDDEN.to_string();
         let url = "http://example.com/plain";
@@ -1021,6 +1039,8 @@ mod tests {
             url: Some("https://chatgpt.com/backend-api/codex/responses".to_string()),
             cf_ray: None,
             request_id: Some("req-123".to_string()),
+            identity_authorization_error: None,
+            identity_error_code: None,
         };
         let status = StatusCode::UNAUTHORIZED.to_string();
         assert_eq!(
@@ -1040,6 +1060,8 @@ mod tests {
             url: Some("http://example.com/long".to_string()),
             cf_ray: None,
             request_id: Some("req-long".to_string()),
+            identity_authorization_error: None,
+            identity_error_code: None,
         };
         let status = StatusCode::BAD_GATEWAY.to_string();
         let expected_body = format!("{}...", "x".repeat(UNEXPECTED_RESPONSE_BODY_MAX_BYTES));
@@ -1059,12 +1081,34 @@ mod tests {
             url: Some("https://chatgpt.com/backend-api/codex/responses".to_string()),
             cf_ray: Some("9c81f9f18f2fa49d-LHR".to_string()),
             request_id: Some("req-xyz".to_string()),
+            identity_authorization_error: None,
+            identity_error_code: None,
         };
         let status = StatusCode::UNAUTHORIZED.to_string();
         assert_eq!(
             err.to_string(),
             format!(
                 "unexpected status {status}: plain text error, url: https://chatgpt.com/backend-api/codex/responses, cf-ray: 9c81f9f18f2fa49d-LHR, request id: req-xyz"
+            )
+        );
+    }
+
+    #[test]
+    fn unexpected_status_includes_identity_auth_details() {
+        let err = UnexpectedResponseError {
+            status: StatusCode::UNAUTHORIZED,
+            body: "plain text error".to_string(),
+            url: Some("https://chatgpt.com/backend-api/codex/models".to_string()),
+            cf_ray: Some("9daa94119a96d1e1-ICN".to_string()),
+            request_id: Some("req-auth".to_string()),
+            identity_authorization_error: Some("missing_authorization_header".to_string()),
+            identity_error_code: Some("token_expired".to_string()),
+        };
+        let status = StatusCode::UNAUTHORIZED.to_string();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "unexpected status {status}: plain text error, url: https://chatgpt.com/backend-api/codex/models, cf-ray: 9daa94119a96d1e1-ICN, request id: req-auth, auth error: missing_authorization_header, auth error code: token_expired"
             )
         );
     }

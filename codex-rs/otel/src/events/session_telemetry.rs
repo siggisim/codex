@@ -406,6 +406,33 @@ impl SessionTelemetry {
         );
     }
 
+    pub fn record_auth_recovery(
+        &self,
+        mode: &str,
+        step: &str,
+        outcome: &str,
+        request_id: Option<&str>,
+        cf_ray: Option<&str>,
+        auth_error: Option<&str>,
+        auth_error_code: Option<&str>,
+    ) {
+        log_and_trace_event!(
+            self,
+            common: {
+                event.name = "codex.auth_recovery",
+                auth.mode = mode,
+                auth.step = step,
+                auth.outcome = outcome,
+                auth.request_id = request_id,
+                auth.cf_ray = cf_ray,
+                auth.error = auth_error,
+                auth.error_code = auth_error_code,
+            },
+            log: {},
+            trace: {},
+        );
+    }
+
     pub fn record_websocket_event(
         &self,
         result: &Result<

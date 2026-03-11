@@ -1,3 +1,4 @@
+use base64::Engine;
 use chrono::DateTime;
 use chrono::Utc;
 use codex_api::AuthProvider as ApiAuthProvider;
@@ -7,6 +8,7 @@ use codex_api::rate_limits::parse_promo_message;
 use codex_api::rate_limits::parse_rate_limit_for_limit;
 use http::HeaderMap;
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::auth::CodexAuth;
 use crate::error::CodexErr;
@@ -30,6 +32,8 @@ pub(crate) fn map_api_error(err: ApiError) -> CodexErr {
             url: None,
             cf_ray: None,
             request_id: None,
+            identity_authorization_error: None,
+            identity_error_code: None,
         }),
         ApiError::InvalidRequest { message } => CodexErr::InvalidRequest(message),
         ApiError::Transport(transport) => match transport {
@@ -98,6 +102,11 @@ pub(crate) fn map_api_error(err: ApiError) -> CodexErr {
                         url,
                         cf_ray: extract_header(headers.as_ref(), CF_RAY_HEADER),
                         request_id: extract_request_id(headers.as_ref()),
+                        identity_authorization_error: extract_header(
+                            headers.as_ref(),
+                            X_OPENAI_AUTHORIZATION_ERROR_HEADER,
+                        ),
+                        identity_error_code: extract_x_error_json_code(headers.as_ref()),
                     })
                 }
             }
@@ -118,10 +127,13 @@ const ACTIVE_LIMIT_HEADER: &str = "x-codex-active-limit";
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const OAI_REQUEST_ID_HEADER: &str = "x-oai-request-id";
 const CF_RAY_HEADER: &str = "cf-ray";
+const X_OPENAI_AUTHORIZATION_ERROR_HEADER: &str = "x-openai-authorization-error";
+const X_ERROR_JSON_HEADER: &str = "x-error-json";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -217,6 +229,41 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn map_api_error_extracts_identity_auth_details_from_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(REQUEST_ID_HEADER, http::HeaderValue::from_static("req-401"));
+        headers.insert(CF_RAY_HEADER, http::HeaderValue::from_static("ray-401"));
+        headers.insert(
+            X_OPENAI_AUTHORIZATION_ERROR_HEADER,
+            http::HeaderValue::from_static("missing_authorization_header"),
+        );
+        let x_error_json = base64::engine::general_purpose::STANDARD
+            .encode(r#"{"error":{"code":"token_expired"}}"#);
+        headers.insert(
+            X_ERROR_JSON_HEADER,
+            http::HeaderValue::from_str(&x_error_json).expect("valid x-error-json header"),
+        );
+
+        let err = map_api_error(ApiError::Transport(TransportError::Http {
+            status: http::StatusCode::UNAUTHORIZED,
+            url: Some("https://chatgpt.com/backend-api/codex/models".to_string()),
+            headers: Some(headers),
+            body: Some(r#"{"detail":"Unauthorized"}"#.to_string()),
+        }));
+
+        let CodexErr::UnexpectedStatus(err) = err else {
+            panic!("expected CodexErr::UnexpectedStatus, got {err:?}");
+        };
+        assert_eq!(err.request_id.as_deref(), Some("req-401"));
+        assert_eq!(err.cf_ray.as_deref(), Some("ray-401"));
+        assert_eq!(
+            err.identity_authorization_error.as_deref(),
+            Some("missing_authorization_header")
+        );
+        assert_eq!(err.identity_error_code.as_deref(), Some("token_expired"));
+    }
 }
 
 fn extract_request_tracking_id(headers: Option<&HeaderMap>) -> Option<String> {
@@ -234,6 +281,19 @@ fn extract_header(headers: Option<&HeaderMap>, name: &str) -> Option<String> {
             .and_then(|value| value.to_str().ok())
             .map(str::to_string)
     })
+}
+
+fn extract_x_error_json_code(headers: Option<&HeaderMap>) -> Option<String> {
+    let encoded = extract_header(headers, X_ERROR_JSON_HEADER)?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    let parsed = serde_json::from_slice::<Value>(&decoded).ok()?;
+    parsed
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 pub(crate) fn auth_provider_from_auth(

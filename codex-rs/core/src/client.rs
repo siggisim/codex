@@ -34,6 +34,7 @@ use crate::api_bridge::CoreAuthProvider;
 use crate::api_bridge::auth_provider_from_auth;
 use crate::api_bridge::map_api_error;
 use crate::auth::UnauthorizedRecovery;
+use base64::Engine;
 use codex_api::CompactClient as ApiCompactClient;
 use codex_api::CompactionInput as ApiCompactionInput;
 use codex_api::MemoriesClient as ApiMemoriesClient;
@@ -806,7 +807,12 @@ impl ModelClientSession {
                 Err(ApiError::Transport(
                     unauthorized_transport @ TransportError::Http { status, .. },
                 )) if status == StatusCode::UNAUTHORIZED => {
-                    handle_unauthorized(unauthorized_transport, &mut auth_recovery).await?;
+                    handle_unauthorized(
+                        unauthorized_transport,
+                        &mut auth_recovery,
+                        session_telemetry,
+                    )
+                    .await?;
                     continue;
                 }
                 Err(err) => return Err(map_api_error(err)),
@@ -872,7 +878,12 @@ impl ModelClientSession {
                 Err(ApiError::Transport(
                     unauthorized_transport @ TransportError::Http { status, .. },
                 )) if status == StatusCode::UNAUTHORIZED => {
-                    handle_unauthorized(unauthorized_transport, &mut auth_recovery).await?;
+                    handle_unauthorized(
+                        unauthorized_transport,
+                        &mut auth_recovery,
+                        session_telemetry,
+                    )
+                    .await?;
                     continue;
                 }
                 Err(err) => return Err(map_api_error(err)),
@@ -1188,18 +1199,110 @@ where
 async fn handle_unauthorized(
     transport: TransportError,
     auth_recovery: &mut Option<UnauthorizedRecovery>,
+    session_telemetry: &SessionTelemetry,
 ) -> Result<()> {
+    let debug = extract_unauthorized_debug_context(&transport);
     if let Some(recovery) = auth_recovery
         && recovery.has_next()
     {
+        let mode = recovery.mode_name();
+        let step = recovery.step_name();
         return match recovery.next().await {
-            Ok(_) => Ok(()),
-            Err(RefreshTokenError::Permanent(failed)) => Err(CodexErr::RefreshTokenFailed(failed)),
-            Err(RefreshTokenError::Transient(other)) => Err(CodexErr::Io(other)),
+            Ok(_) => {
+                session_telemetry.record_auth_recovery(
+                    mode,
+                    step,
+                    "recovery_succeeded",
+                    debug.request_id.as_deref(),
+                    debug.cf_ray.as_deref(),
+                    debug.auth_error.as_deref(),
+                    debug.auth_error_code.as_deref(),
+                );
+                Ok(())
+            }
+            Err(RefreshTokenError::Permanent(failed)) => {
+                session_telemetry.record_auth_recovery(
+                    mode,
+                    step,
+                    "recovery_failed_permanent",
+                    debug.request_id.as_deref(),
+                    debug.cf_ray.as_deref(),
+                    debug.auth_error.as_deref(),
+                    debug.auth_error_code.as_deref(),
+                );
+                Err(CodexErr::RefreshTokenFailed(failed))
+            }
+            Err(RefreshTokenError::Transient(other)) => {
+                session_telemetry.record_auth_recovery(
+                    mode,
+                    step,
+                    "recovery_failed_transient",
+                    debug.request_id.as_deref(),
+                    debug.cf_ray.as_deref(),
+                    debug.auth_error.as_deref(),
+                    debug.auth_error_code.as_deref(),
+                );
+                Err(CodexErr::Io(other))
+            }
         };
     }
 
     Err(map_api_error(ApiError::Transport(transport)))
+}
+
+struct UnauthorizedDebugContext {
+    request_id: Option<String>,
+    cf_ray: Option<String>,
+    auth_error: Option<String>,
+    auth_error_code: Option<String>,
+}
+
+fn extract_unauthorized_debug_context(transport: &TransportError) -> UnauthorizedDebugContext {
+    const REQUEST_ID_HEADER: &str = "x-request-id";
+    const OAI_REQUEST_ID_HEADER: &str = "x-oai-request-id";
+    const CF_RAY_HEADER: &str = "cf-ray";
+    const AUTH_ERROR_HEADER: &str = "x-openai-authorization-error";
+    const X_ERROR_JSON_HEADER: &str = "x-error-json";
+
+    let mut context = UnauthorizedDebugContext {
+        request_id: None,
+        cf_ray: None,
+        auth_error: None,
+        auth_error_code: None,
+    };
+
+    let TransportError::Http {
+        headers: Some(headers),
+        ..
+    } = transport
+    else {
+        return context;
+    };
+
+    let extract_header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+    };
+
+    context.request_id =
+        extract_header(REQUEST_ID_HEADER).or_else(|| extract_header(OAI_REQUEST_ID_HEADER));
+    context.cf_ray = extract_header(CF_RAY_HEADER);
+    context.auth_error = extract_header(AUTH_ERROR_HEADER);
+    context.auth_error_code = extract_header(X_ERROR_JSON_HEADER).and_then(|encoded| {
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .ok()?;
+        let parsed = serde_json::from_slice::<serde_json::Value>(&decoded).ok()?;
+        parsed
+            .get("error")
+            .and_then(|error| error.get("code"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    });
+
+    context
 }
 
 struct ApiTelemetry {
@@ -1263,12 +1366,15 @@ impl WebsocketTelemetry for ApiTelemetry {
 #[cfg(test)]
 mod tests {
     use super::ModelClient;
+    use super::extract_unauthorized_debug_context;
+    use codex_api::TransportError;
     use codex_otel::SessionTelemetry;
     use codex_protocol::ThreadId;
     use codex_protocol::openai_models::ModelInfo;
     use codex_protocol::protocol::SessionSource;
     use codex_protocol::protocol::SubAgentSource;
     use pretty_assertions::assert_eq;
+    use reqwest::StatusCode;
     use serde_json::json;
 
     fn test_model_client(session_source: SessionSource) -> ModelClient {
@@ -1357,5 +1463,38 @@ mod tests {
             .await
             .expect("empty summarize request should succeed");
         assert_eq!(output.len(), 0);
+    }
+
+    #[test]
+    fn extract_unauthorized_debug_context_decodes_identity_headers() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            "x-oai-request-id",
+            http::HeaderValue::from_static("req-401"),
+        );
+        headers.insert("cf-ray", http::HeaderValue::from_static("ray-401"));
+        headers.insert(
+            "x-openai-authorization-error",
+            http::HeaderValue::from_static("missing_authorization_header"),
+        );
+        headers.insert(
+            "x-error-json",
+            http::HeaderValue::from_static("eyJlcnJvciI6eyJjb2RlIjoidG9rZW5fZXhwaXJlZCJ9fQ=="),
+        );
+
+        let context = extract_unauthorized_debug_context(&TransportError::Http {
+            status: StatusCode::UNAUTHORIZED,
+            url: Some("https://chatgpt.com/backend-api/codex/models".to_string()),
+            headers: Some(headers),
+            body: Some(r#"{"detail":"Unauthorized"}"#.to_string()),
+        });
+
+        assert_eq!(context.request_id.as_deref(), Some("req-401"));
+        assert_eq!(context.cf_ray.as_deref(), Some("ray-401"));
+        assert_eq!(
+            context.auth_error.as_deref(),
+            Some("missing_authorization_header")
+        );
+        assert_eq!(context.auth_error_code.as_deref(), Some("token_expired"));
     }
 }
