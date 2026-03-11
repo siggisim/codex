@@ -24,6 +24,7 @@ use crate::SandboxState;
 use crate::config::Config;
 use crate::config::types::AppToolApproval;
 use crate::config::types::AppsConfigToml;
+use crate::config_loader::AppsRequirementsToml;
 use crate::default_client::is_first_party_chat_originator;
 use crate::default_client::originator;
 use crate::features::Feature;
@@ -527,7 +528,32 @@ fn is_connector_id_allowed_for_originator(connector_id: &str, originator_value: 
 fn read_apps_config(config: &Config) -> Option<AppsConfigToml> {
     let effective_config = config.config_layer_stack.effective_config();
     let apps_config = effective_config.as_table()?.get("apps")?.clone();
-    AppsConfigToml::deserialize(apps_config).ok()
+    let mut apps_config = AppsConfigToml::deserialize(apps_config).ok()?;
+    apply_requirements_apps_constraints(
+        &mut apps_config,
+        config.config_layer_stack.requirements_toml().apps.as_ref(),
+    );
+    Some(apps_config)
+}
+
+fn apply_requirements_apps_constraints(
+    apps_config: &mut AppsConfigToml,
+    requirements_apps_config: Option<&AppsRequirementsToml>,
+) {
+    let Some(requirements_apps_config) = requirements_apps_config else {
+        return;
+    };
+
+    for (app_id, requirement) in &requirements_apps_config.apps {
+        if !app_id.starts_with("connector_") {
+            continue;
+        }
+        if requirement.enabled != Some(false) {
+            continue;
+        }
+        let app = apps_config.apps.entry(app_id.clone()).or_default();
+        app.enabled = false;
+    }
 }
 
 fn app_is_enabled(apps_config: &AppsConfigToml, connector_id: Option<&str>) -> bool {
@@ -728,6 +754,7 @@ mod tests {
     use crate::config::types::AppToolConfig;
     use crate::config::types::AppToolsConfig;
     use crate::config::types::AppsDefaultConfig;
+    use crate::config_loader::AppRequirementToml;
     use crate::mcp_connection_manager::ToolInfo;
     use pretty_assertions::assert_eq;
     use rmcp::model::JsonObject;
@@ -996,6 +1023,99 @@ mod tests {
 
         assert!(app_is_enabled(&apps_config, Some("calendar")));
         assert!(!app_is_enabled(&apps_config, Some("drive")));
+    }
+
+    #[test]
+    fn requirements_disabled_connector_overrides_enabled_connector() {
+        let mut effective_apps = AppsConfigToml {
+            default: None,
+            apps: HashMap::from([(
+                "connector_123123".to_string(),
+                AppConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+            )]),
+        };
+        let requirements_apps = AppsRequirementsToml {
+            apps: std::collections::BTreeMap::from([(
+                "connector_123123".to_string(),
+                AppRequirementToml {
+                    enabled: Some(false),
+                },
+            )]),
+        };
+
+        apply_requirements_apps_constraints(&mut effective_apps, Some(&requirements_apps));
+
+        assert_eq!(
+            effective_apps
+                .apps
+                .get("connector_123123")
+                .map(|app| app.enabled),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn requirements_enabled_does_not_override_disabled_connector() {
+        let mut effective_apps = AppsConfigToml {
+            default: None,
+            apps: HashMap::from([(
+                "connector_123123".to_string(),
+                AppConfig {
+                    enabled: false,
+                    ..Default::default()
+                },
+            )]),
+        };
+        let requirements_apps = AppsRequirementsToml {
+            apps: std::collections::BTreeMap::from([(
+                "connector_123123".to_string(),
+                AppRequirementToml {
+                    enabled: Some(true),
+                },
+            )]),
+        };
+
+        apply_requirements_apps_constraints(&mut effective_apps, Some(&requirements_apps));
+
+        assert_eq!(
+            effective_apps
+                .apps
+                .get("connector_123123")
+                .map(|app| app.enabled),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn requirements_disabled_non_connector_does_not_override_enabled_app() {
+        let mut effective_apps = AppsConfigToml {
+            default: None,
+            apps: HashMap::from([(
+                "calendar".to_string(),
+                AppConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+            )]),
+        };
+        let requirements_apps = AppsRequirementsToml {
+            apps: std::collections::BTreeMap::from([(
+                "calendar".to_string(),
+                AppRequirementToml {
+                    enabled: Some(false),
+                },
+            )]),
+        };
+
+        apply_requirements_apps_constraints(&mut effective_apps, Some(&requirements_apps));
+
+        assert_eq!(
+            effective_apps.apps.get("calendar").map(|app| app.enabled),
+            Some(true)
+        );
     }
 
     #[test]
