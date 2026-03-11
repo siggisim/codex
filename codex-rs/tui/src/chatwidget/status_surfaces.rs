@@ -548,11 +548,18 @@ impl ChatWidget {
             return "Starting".to_string();
         }
 
-        if !self.bottom_pane.is_task_running() {
-            return "Ready".to_string();
-        }
-
         match self.terminal_title_status_kind {
+            TerminalTitleStatusKind::Working if !self.bottom_pane.is_task_running() => {
+                "Ready".to_string()
+            }
+            TerminalTitleStatusKind::WaitingForBackgroundTerminal
+                if !self.bottom_pane.is_task_running() =>
+            {
+                "Ready".to_string()
+            }
+            TerminalTitleStatusKind::Thinking if !self.bottom_pane.is_task_running() => {
+                "Ready".to_string()
+            }
             TerminalTitleStatusKind::Working => "Working".to_string(),
             TerminalTitleStatusKind::WaitingForBackgroundTerminal => "Waiting".to_string(),
             TerminalTitleStatusKind::Undoing => "Undoing".to_string(),
@@ -565,7 +572,7 @@ impl ChatWidget {
             return None;
         }
 
-        if self.mcp_startup_status.is_none() && !self.bottom_pane.is_task_running() {
+        if !self.terminal_title_has_active_progress() {
             return None;
         }
 
@@ -586,10 +593,16 @@ impl ChatWidget {
             .is_none_or(|items| items.iter().any(|item| item == "spinner"))
     }
 
+    fn terminal_title_has_active_progress(&self) -> bool {
+        self.mcp_startup_status.is_some()
+            || self.bottom_pane.is_task_running()
+            || self.terminal_title_status_kind == TerminalTitleStatusKind::Undoing
+    }
+
     pub(super) fn should_animate_terminal_title_spinner(&self) -> bool {
         self.config.animations
             && self.terminal_title_uses_spinner()
-            && (self.mcp_startup_status.is_some() || self.bottom_pane.is_task_running())
+            && self.terminal_title_has_active_progress()
     }
 
     fn should_animate_terminal_title_spinner_with_selections(
@@ -600,7 +613,7 @@ impl ChatWidget {
             && selections
                 .terminal_title_items
                 .contains(&TerminalTitleItem::Spinner)
-            && (self.mcp_startup_status.is_some() || self.bottom_pane.is_task_running())
+            && self.terminal_title_has_active_progress()
     }
 
     /// Formats the last `update_plan` progress snapshot for terminal-title display.

@@ -9921,6 +9921,21 @@ async fn terminal_title_uses_spaces_around_spinner_item() {
 }
 
 #[tokio::test]
+async fn terminal_title_shows_spinner_and_undoing_without_task_running() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.animations = true;
+    chat.config.tui_terminal_title = Some(vec!["spinner".to_string(), "status".to_string()]);
+    chat.terminal_title_status_kind = TerminalTitleStatusKind::Undoing;
+    chat.terminal_title_animation_origin = Instant::now() + Duration::from_secs(1);
+
+    assert!(!chat.bottom_pane.is_task_running());
+
+    chat.refresh_terminal_title();
+
+    assert_eq!(chat.last_terminal_title, Some("⠋ Undoing".to_string()));
+}
+
+#[tokio::test]
 async fn on_task_started_resets_terminal_title_task_progress() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.last_plan_progress = Some((2, 5));
