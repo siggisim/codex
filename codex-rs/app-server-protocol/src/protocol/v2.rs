@@ -4597,7 +4597,7 @@ pub struct ItemStartedNotification {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ItemCompletedNotification {
+pub struct AutoApprovalReviewStartedNotification {
     pub item: ThreadItem,
     pub thread_id: String,
     pub turn_id: String,
@@ -4606,7 +4606,7 @@ pub struct ItemCompletedNotification {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ItemUpdatedNotification {
+pub struct ItemCompletedNotification {
     pub item: ThreadItem,
     pub thread_id: String,
     pub turn_id: String,
