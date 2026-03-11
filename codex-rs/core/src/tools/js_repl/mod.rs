@@ -875,6 +875,10 @@ impl JsReplManager {
                     .features
                     .enabled(crate::features::Feature::UseLinuxSandboxBwrap),
                 windows_sandbox_level: turn.windows_sandbox_level,
+                windows_sandbox_private_desktop: turn
+                    .config
+                    .permissions
+                    .windows_sandbox_private_desktop,
             })
             .map_err(|err| format!("failed to configure sandbox for js_repl: {err}"))?;
 

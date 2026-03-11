@@ -507,6 +507,7 @@ async fn prepare_escalated_exec_turn_default_preserves_macos_seatbelt_extensions
         ),
         network_sandbox_policy: NetworkSandboxPolicy::Restricted,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
+        windows_sandbox_private_desktop: false,
         sandbox_permissions: SandboxPermissions::UseDefault,
         justification: None,
         arg0: None,
@@ -559,6 +560,7 @@ async fn prepare_escalated_exec_permissions_preserve_macos_seatbelt_extensions()
         file_system_sandbox_policy: FileSystemSandboxPolicy::from(&SandboxPolicy::DangerFullAccess),
         network_sandbox_policy: NetworkSandboxPolicy::Enabled,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
+        windows_sandbox_private_desktop: false,
         sandbox_permissions: SandboxPermissions::UseDefault,
         justification: None,
         arg0: None,
@@ -579,6 +581,7 @@ async fn prepare_escalated_exec_permissions_preserve_macos_seatbelt_extensions()
         allow_login_shell: true,
         shell_environment_policy: ShellEnvironmentPolicy::default(),
         windows_sandbox_mode: None,
+        windows_sandbox_private_desktop: false,
         macos_seatbelt_profile_extensions: Some(MacOsSeatbeltProfileExtensions {
             macos_preferences: MacOsPreferencesPermission::ReadWrite,
             ..Default::default()
@@ -635,6 +638,7 @@ async fn prepare_escalated_exec_permission_profile_unions_turn_and_requested_mac
         file_system_sandbox_policy: FileSystemSandboxPolicy::from(&sandbox_policy),
         network_sandbox_policy: NetworkSandboxPolicy::from(&sandbox_policy),
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
+        windows_sandbox_private_desktop: false,
         sandbox_permissions: SandboxPermissions::UseDefault,
         justification: None,
         arg0: None,

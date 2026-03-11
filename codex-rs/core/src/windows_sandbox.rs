@@ -75,6 +75,19 @@ pub fn resolve_windows_sandbox_mode(
         .or_else(|| legacy_windows_sandbox_mode(cfg.features.as_ref()))
 }
 
+pub fn resolve_windows_sandbox_private_desktop(cfg: &ConfigToml, profile: &ConfigProfile) -> bool {
+    profile
+        .windows
+        .as_ref()
+        .and_then(|windows| windows.sandbox_private_desktop)
+        .or_else(|| {
+            cfg.windows
+                .as_ref()
+                .and_then(|windows| windows.sandbox_private_desktop)
+        })
+        .unwrap_or(true)
+}
+
 fn legacy_windows_sandbox_keys_present(features: Option<&FeaturesToml>) -> bool {
     let Some(entries) = features.map(|features| &features.entries) else {
         return false;
@@ -507,12 +520,14 @@ mod tests {
         let cfg = ConfigToml {
             windows: Some(WindowsToml {
                 sandbox: Some(WindowsSandboxModeToml::Unelevated),
+                ..Default::default()
             }),
             ..Default::default()
         };
         let profile = ConfigProfile {
             windows: Some(WindowsToml {
                 sandbox: Some(WindowsSandboxModeToml::Elevated),
+                ..Default::default()
             }),
             ..Default::default()
         };
@@ -559,5 +574,49 @@ mod tests {
         };
 
         assert_eq!(resolve_windows_sandbox_mode(&cfg, &profile), None);
+    }
+
+    #[test]
+    fn resolve_windows_sandbox_private_desktop_prefers_profile_windows() {
+        let cfg = ConfigToml {
+            windows: Some(WindowsToml {
+                sandbox: Some(WindowsSandboxModeToml::Unelevated),
+                sandbox_private_desktop: Some(false),
+            }),
+            ..Default::default()
+        };
+        let profile = ConfigProfile {
+            windows: Some(WindowsToml {
+                sandbox: Some(WindowsSandboxModeToml::Elevated),
+                sandbox_private_desktop: Some(true),
+            }),
+            ..Default::default()
+        };
+
+        assert!(resolve_windows_sandbox_private_desktop(&cfg, &profile));
+    }
+
+    #[test]
+    fn resolve_windows_sandbox_private_desktop_defaults_to_true() {
+        assert!(resolve_windows_sandbox_private_desktop(
+            &ConfigToml::default(),
+            &ConfigProfile::default()
+        ));
+    }
+
+    #[test]
+    fn resolve_windows_sandbox_private_desktop_respects_explicit_cfg_value() {
+        let cfg = ConfigToml {
+            windows: Some(WindowsToml {
+                sandbox_private_desktop: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        assert!(!resolve_windows_sandbox_private_desktop(
+            &cfg,
+            &ConfigProfile::default()
+        ));
     }
 }
