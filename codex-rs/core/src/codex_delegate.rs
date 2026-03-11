@@ -845,11 +845,13 @@ mod tests {
             .unwrap();
 
         let cancel = CancellationToken::new();
+        let pending_mcp_invocations = Arc::new(Mutex::new(HashMap::new()));
         let forward = tokio::spawn(forward_events(
             Arc::clone(&codex),
             tx_out.clone(),
             session,
             ctx,
+            pending_mcp_invocations,
             cancel.clone(),
         ));
 
