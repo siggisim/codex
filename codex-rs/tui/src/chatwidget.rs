@@ -2659,6 +2659,8 @@ impl ChatWidget {
     fn on_undo_completed(&mut self, event: UndoCompletedEvent) {
         let UndoCompletedEvent { success, message } = event;
         self.bottom_pane.hide_status_indicator();
+        self.terminal_title_status_kind = TerminalTitleStatusKind::Working;
+        self.refresh_terminal_title();
         let message = message.unwrap_or_else(|| {
             if success {
                 "Undo completed successfully.".to_string()

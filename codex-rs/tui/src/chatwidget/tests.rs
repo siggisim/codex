@@ -6212,6 +6212,31 @@ async fn undo_started_hides_interrupt_hint() {
     );
 }
 
+#[tokio::test]
+async fn undo_completed_clears_terminal_title_undo_state() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.animations = true;
+    chat.config.tui_terminal_title = Some(vec!["spinner".to_string(), "status".to_string()]);
+    chat.terminal_title_animation_origin = Instant::now() + Duration::from_secs(1);
+
+    chat.handle_codex_event(Event {
+        id: "turn-undo".to_string(),
+        msg: EventMsg::UndoStarted(UndoStartedEvent { message: None }),
+    });
+
+    assert_eq!(chat.last_terminal_title, Some("⠋ Undoing".to_string()));
+
+    chat.handle_codex_event(Event {
+        id: "turn-undo".to_string(),
+        msg: EventMsg::UndoCompleted(UndoCompletedEvent {
+            success: true,
+            message: None,
+        }),
+    });
+
+    assert_eq!(chat.last_terminal_title, Some("Ready".to_string()));
+}
+
 /// The commit picker shows only commit subjects (no timestamps).
 #[tokio::test]
 async fn review_commit_picker_shows_subjects_without_timestamps() {
