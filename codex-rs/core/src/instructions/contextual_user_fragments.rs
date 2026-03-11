@@ -76,14 +76,20 @@ impl TurnContextDiffFragment for AgentsMdInstructions {
 impl ContextualUserFragmentDetector for AgentsMdInstructions {
     fn matches_contextual_user_text(text: &str) -> bool {
         let trimmed = text.trim_start();
-        let Some(after_open_tag_prefix) = trimmed.strip_prefix(AGENTS_MD_OPEN_TAG_PREFIX) else {
-            return false;
-        };
-        let Some((directory, remaining)) = after_open_tag_prefix.split_once('>') else {
-            return false;
-        };
-        let expected_close_tag = format!("{AGENTS_MD_CLOSE_TAG_PREFIX}{directory}>");
-        remaining.trim_end().ends_with(&expected_close_tag)
+        if let Some(after_open_tag_prefix) = trimmed.strip_prefix(AGENTS_MD_OPEN_TAG_PREFIX) {
+            let Some((directory, remaining)) = after_open_tag_prefix.split_once('>') else {
+                return false;
+            };
+            let expected_close_tag = format!("{AGENTS_MD_CLOSE_TAG_PREFIX}{directory}>");
+            return remaining.trim_end().ends_with(&expected_close_tag);
+        }
+
+        // TODO(ccunningham): Drop this legacy detector once pre-XML-ish AGENTS
+        // history no longer needs resume/compaction compatibility.
+        const LEGACY_AGENTS_MD_START_MARKER: &str = "# AGENTS.md instructions for ";
+        const LEGACY_AGENTS_MD_END_MARKER: &str = "</INSTRUCTIONS>";
+        trimmed.starts_with(LEGACY_AGENTS_MD_START_MARKER)
+            && trimmed.trim_end().ends_with(LEGACY_AGENTS_MD_END_MARKER)
     }
 }
 
@@ -184,6 +190,11 @@ mod tests {
         assert!(
             <AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
                 "<AGENTS.md INSTRUCTIONS FOR test_directory>\ntest_text\n</AGENTS.md INSTRUCTIONS FOR test_directory>"
+            )
+        );
+        assert!(
+            <AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
+                "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>"
             )
         );
         assert!(
