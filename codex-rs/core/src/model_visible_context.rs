@@ -184,11 +184,18 @@ impl<'a> TurnContextDiffParams<'a> {
 /// state rather than one-off runtime events.
 pub(crate) trait TurnContextDiffFragment: ModelVisibleContextFragment + Sized {
     /// Build the fragment from the current turn state and an optional baseline
-    /// context item that represents the turn state already reflected in the
-    /// model-visible history so far.
+    /// context item.
+    ///
+    /// `reference_context_item` is the last persisted turn-context snapshot whose
+    /// effects are already represented in model-visible history. Implementations
+    /// should diff `turn_context` against this baseline and return `None` when
+    /// there is no model-visible change to inject.
     ///
     /// `reference_context_item` is `None` for initial-context assembly and when
-    /// no baseline turn context can be recovered (for example after compaction).
+    /// no baseline turn context can be recovered (for example after
+    /// compaction/backtracking/resume), so implementations should treat that as
+    /// "no known represented baseline" and decide whether to emit full current
+    /// state or nothing.
     fn build(
         turn_context: &TurnContext,
         reference_context_item: Option<&TurnContextItem>,
