@@ -62,8 +62,8 @@ impl TurnContextDiffFragment for AgentsMdInstructions {
         };
         if let Some(previous) = reference_context_item {
             let previous_directory = previous.cwd.to_string_lossy().into_owned();
-            if previous.user_instructions.as_deref() == Some(current.text.as_str())
-                && previous_directory == current.directory
+            if previous_directory == current.directory
+                && previous.user_instructions.as_deref() == Some(current.text.as_str())
             {
                 return None;
             }
