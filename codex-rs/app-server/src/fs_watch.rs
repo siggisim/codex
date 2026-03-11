@@ -15,6 +15,7 @@ use notify::EventKind;
 use notify::RecommendedWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -57,6 +58,7 @@ struct FsWatchSubscription {
     path: PathBuf,
     filter_path: Option<PathBuf>,
     last_observed_state: Option<ObservedPathState>,
+    last_observed_directory_state: Option<ObservedDirectoryState>,
     pending_changed_paths: BTreeSet<PathBuf>,
     notification_tx: mpsc::Sender<()>,
 }
@@ -85,6 +87,8 @@ struct ObservedPathState {
     len: u64,
     modified_at: Option<SystemTime>,
 }
+
+type ObservedDirectoryState = BTreeMap<PathBuf, ObservedPathState>;
 
 impl FsWatchManager {
     pub(crate) fn new(outgoing: Arc<OutgoingMessageSender>) -> Self {
@@ -118,6 +122,15 @@ impl FsWatchManager {
                 observe_path_state(&resolved.path)
                     .await
                     .map_err(map_io_error)?
+            } else {
+                None
+            },
+            last_observed_directory_state: if resolved.filter_path.is_none() {
+                Some(
+                    observe_directory_state(&resolved.path)
+                        .await
+                        .map_err(map_io_error)?,
+                )
             } else {
                 None
             },
@@ -200,18 +213,22 @@ impl FsWatchManager {
             return Ok(FsUnwatchResponse {});
         };
 
-        let should_remove_entry = if let Some(subscriptions) = state
+        let removed_entry = if let Some(subscriptions) = state
             .entries
             .get(&watch_path_key)
             .map(|entry| entry.subscriptions.clone())
         {
             let mut subscriptions = subscriptions.lock().await;
             subscriptions.remove(&watch_key);
-            subscriptions.is_empty()
+            if subscriptions.is_empty() {
+                state.entries.remove(&watch_path_key)
+            } else {
+                None
+            }
         } else {
-            false
+            None
         };
-        if should_remove_entry && let Some(entry) = state.entries.remove(&watch_path_key) {
+        if let Some(entry) = removed_entry {
             entry.cancel.cancel();
         }
         Ok(FsUnwatchResponse {})
@@ -312,6 +329,13 @@ impl FsWatchManager {
                 };
 
                 for changed_path in changed_paths {
+                    let watch_still_exists = {
+                        let subscriptions = subscriptions.lock().await;
+                        subscriptions.contains_key(&watch_key)
+                    };
+                    if !watch_still_exists {
+                        return;
+                    }
                     outgoing
                         .send_server_notification_to_connections(
                             &[watch_key.connection_id],
@@ -332,13 +356,13 @@ async fn notifications_for_event(
     watch_root: &Path,
     event: &Event,
 ) {
-    let event_is_ambiguous_for_file_subscriptions =
+    let event_is_ambiguous =
         event.paths.is_empty() || event.paths.iter().all(|path| path == watch_root);
 
     for subscription in subscriptions.values_mut() {
         let mut changed_paths_were_mutated = false;
         if let Some(filter_path) = &subscription.filter_path {
-            let is_relevant = if event_is_ambiguous_for_file_subscriptions {
+            let is_relevant = if event_is_ambiguous {
                 match observe_path_state(&subscription.path).await {
                     Ok(next_state) => {
                         let changed = next_state != subscription.last_observed_state;
@@ -378,22 +402,24 @@ async fn notifications_for_event(
                     .pending_changed_paths
                     .insert(subscription.path.clone());
             }
-        } else if event.paths.is_empty() {
-            changed_paths_were_mutated = subscription
-                .pending_changed_paths
-                .insert(subscription.path.clone());
         } else {
-            let mut seen_paths = HashSet::new();
-            for changed_path in &event.paths {
-                let changed_path = if changed_path == watch_root {
-                    subscription.path.clone()
-                } else {
-                    changed_path.clone()
-                };
-                if seen_paths.insert(changed_path.clone())
-                    && subscription.pending_changed_paths.insert(changed_path)
-                {
-                    changed_paths_were_mutated = true;
+            match directory_changed_paths(subscription, watch_root, event, event_is_ambiguous).await
+            {
+                Ok(changed_paths) => {
+                    let mut seen_paths = HashSet::new();
+                    for changed_path in changed_paths {
+                        if seen_paths.insert(changed_path.clone())
+                            && subscription.pending_changed_paths.insert(changed_path)
+                        {
+                            changed_paths_were_mutated = true;
+                        }
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        "failed to inspect watched directory state for {}: {err}",
+                        subscription.path.display()
+                    );
                 }
             }
         }
@@ -406,15 +432,89 @@ async fn notifications_for_event(
 
 async fn observe_path_state(path: &Path) -> io::Result<Option<ObservedPathState>> {
     match tokio::fs::metadata(path).await {
-        Ok(metadata) => Ok(Some(ObservedPathState {
-            is_directory: metadata.is_dir(),
-            is_file: metadata.is_file(),
-            len: metadata.len(),
-            modified_at: metadata.modified().ok(),
-        })),
+        Ok(metadata) => Ok(Some(observed_path_state_from_metadata(metadata))),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err),
     }
+}
+
+async fn observe_directory_state(path: &Path) -> io::Result<ObservedDirectoryState> {
+    let mut state = BTreeMap::new();
+    let mut read_dir = match tokio::fs::read_dir(path).await {
+        Ok(read_dir) => read_dir,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(state),
+        Err(err) => return Err(err),
+    };
+
+    while let Some(entry) = read_dir.next_entry().await? {
+        let child_path = entry.path();
+        match tokio::fs::symlink_metadata(&child_path).await {
+            Ok(metadata) => {
+                state.insert(child_path, observed_path_state_from_metadata(metadata));
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(state)
+}
+
+fn observed_path_state_from_metadata(metadata: std::fs::Metadata) -> ObservedPathState {
+    ObservedPathState {
+        is_directory: metadata.is_dir(),
+        is_file: metadata.is_file(),
+        len: metadata.len(),
+        modified_at: metadata.modified().ok(),
+    }
+}
+
+async fn directory_changed_paths(
+    subscription: &mut FsWatchSubscription,
+    watch_root: &Path,
+    event: &Event,
+    event_is_ambiguous: bool,
+) -> io::Result<BTreeSet<PathBuf>> {
+    let next_state = observe_directory_state(&subscription.path).await?;
+    let explicit_paths = event
+        .paths
+        .iter()
+        .filter_map(|path| filter_directory_changed_path(path, watch_root))
+        .collect::<BTreeSet<_>>();
+    let changed_paths = if event_is_ambiguous || explicit_paths.is_empty() {
+        diff_directory_state(
+            subscription.last_observed_directory_state.as_ref(),
+            &next_state,
+        )
+    } else {
+        explicit_paths
+    };
+    subscription.last_observed_directory_state = Some(next_state);
+    Ok(changed_paths)
+}
+
+fn filter_directory_changed_path(changed_path: &Path, watch_root: &Path) -> Option<PathBuf> {
+    if changed_path == watch_root || !changed_path.starts_with(watch_root) {
+        return None;
+    }
+
+    Some(changed_path.to_path_buf())
+}
+
+fn diff_directory_state(
+    previous_state: Option<&ObservedDirectoryState>,
+    next_state: &ObservedDirectoryState,
+) -> BTreeSet<PathBuf> {
+    let mut candidate_paths = BTreeSet::new();
+    if let Some(previous_state) = previous_state {
+        candidate_paths.extend(previous_state.keys().cloned());
+    }
+    candidate_paths.extend(next_state.keys().cloned());
+
+    candidate_paths
+        .into_iter()
+        .filter(|path| previous_state.and_then(|state| state.get(path)) != next_state.get(path))
+        .collect()
 }
 
 fn path_matches_filter(changed_path: &Path, filter_path: &Path, watch_root: &Path) -> bool {
@@ -509,6 +609,26 @@ mod tests {
                 last_observed_state: observe_path_state(path)
                     .await
                     .expect("should capture file state"),
+                last_observed_directory_state: None,
+                pending_changed_paths: BTreeSet::new(),
+                notification_tx,
+            },
+            notification_rx,
+        )
+    }
+
+    async fn directory_subscription(path: &Path) -> (FsWatchSubscription, mpsc::Receiver<()>) {
+        let (notification_tx, notification_rx) = mpsc::channel(1);
+        (
+            FsWatchSubscription {
+                path: path.to_path_buf(),
+                filter_path: None,
+                last_observed_state: None,
+                last_observed_directory_state: Some(
+                    observe_directory_state(path)
+                        .await
+                        .expect("should capture directory state"),
+                ),
                 pending_changed_paths: BTreeSet::new(),
                 notification_tx,
             },
@@ -619,6 +739,85 @@ mod tests {
                     watch_id: "fetch".to_string(),
                 })
                 .expect("fetch subscription should exist")
+                .pending_changed_paths,
+            BTreeSet::from([fetch_head_path])
+        );
+    }
+
+    #[tokio::test]
+    async fn ambiguous_empty_paths_event_notifies_only_the_directory_child_that_changed() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let watch_root = temp_dir.path();
+        let head_path = watch_root.join("HEAD");
+        let fetch_head_path = watch_root.join("FETCH_HEAD");
+        std::fs::write(&head_path, "old-head\n").expect("write HEAD");
+        std::fs::write(&fetch_head_path, "old-fetch\n").expect("write FETCH_HEAD");
+
+        let mut subscriptions = HashMap::from([(
+            WatchKey {
+                connection_id: ConnectionId(1),
+                watch_id: "git-dir".to_string(),
+            },
+            directory_subscription(watch_root).await.0,
+        )]);
+
+        std::fs::write(&fetch_head_path, "new-fetch\n").expect("update FETCH_HEAD");
+
+        notifications_for_event(
+            &mut subscriptions,
+            watch_root,
+            &Event::new(EventKind::Modify(notify::event::ModifyKind::Any)),
+        )
+        .await;
+
+        assert_eq!(
+            subscriptions
+                .get(&WatchKey {
+                    connection_id: ConnectionId(1),
+                    watch_id: "git-dir".to_string(),
+                })
+                .expect("directory subscription should exist")
+                .pending_changed_paths,
+            BTreeSet::from([fetch_head_path])
+        );
+    }
+
+    #[tokio::test]
+    async fn directory_watch_ignores_paths_outside_the_watched_directory() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let outside_dir = TempDir::new().expect("outside dir");
+        let watch_root = temp_dir.path();
+        let fetch_head_path = watch_root.join("FETCH_HEAD");
+        let outside_path = outside_dir.path().join("FETCH_HEAD");
+        std::fs::write(&fetch_head_path, "old-fetch\n").expect("write FETCH_HEAD");
+        std::fs::write(&outside_path, "outside\n").expect("write outside path");
+
+        let mut subscriptions = HashMap::from([(
+            WatchKey {
+                connection_id: ConnectionId(1),
+                watch_id: "git-dir".to_string(),
+            },
+            directory_subscription(watch_root).await.0,
+        )]);
+
+        notifications_for_event(
+            &mut subscriptions,
+            watch_root,
+            &Event::new(EventKind::Modify(notify::event::ModifyKind::Name(
+                notify::event::RenameMode::Both,
+            )))
+            .add_path(fetch_head_path.clone())
+            .add_path(outside_path),
+        )
+        .await;
+
+        assert_eq!(
+            subscriptions
+                .get(&WatchKey {
+                    connection_id: ConnectionId(1),
+                    watch_id: "git-dir".to_string(),
+                })
+                .expect("directory subscription should exist")
                 .pending_changed_paths,
             BTreeSet::from([fetch_head_path])
         );
