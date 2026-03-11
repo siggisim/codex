@@ -197,7 +197,13 @@ impl ChatWidget {
                 title
             });
         let title = (!title.is_empty()).then_some(title);
+        let should_animate_spinner =
+            self.should_animate_terminal_title_spinner_with_selections(selections);
         if self.last_terminal_title == title {
+            if should_animate_spinner {
+                self.frame_requester
+                    .schedule_frame_in(TERMINAL_TITLE_SPINNER_INTERVAL);
+            }
             return;
         }
         match title {
@@ -221,7 +227,7 @@ impl ChatWidget {
             }
         }
 
-        if self.should_animate_terminal_title_spinner_with_selections(selections) {
+        if should_animate_spinner {
             self.frame_requester
                 .schedule_frame_in(TERMINAL_TITLE_SPINNER_INTERVAL);
         }

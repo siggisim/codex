@@ -9961,6 +9961,23 @@ async fn terminal_title_shows_spinner_and_undoing_without_task_running() {
 }
 
 #[tokio::test]
+async fn terminal_title_reschedules_spinner_when_title_text_is_unchanged() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    let (frame_requester, mut frame_schedule_rx) = FrameRequester::test_observable();
+    chat.frame_requester = frame_requester;
+    chat.config.animations = true;
+    chat.config.tui_terminal_title = Some(vec!["spinner".to_string()]);
+    chat.bottom_pane.set_task_running(true);
+    chat.terminal_title_status_kind = TerminalTitleStatusKind::Working;
+    chat.terminal_title_animation_origin = Instant::now() + Duration::from_secs(1);
+    chat.last_terminal_title = Some("⠋".to_string());
+
+    chat.refresh_terminal_title();
+
+    assert!(frame_schedule_rx.try_recv().is_ok());
+}
+
+#[tokio::test]
 async fn on_task_started_resets_terminal_title_task_progress() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.last_plan_progress = Some((2, 5));
