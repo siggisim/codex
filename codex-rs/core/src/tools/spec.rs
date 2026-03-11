@@ -24,6 +24,7 @@ use crate::tools::handlers::request_user_input_tool_description;
 use crate::tools::registry::ToolRegistryBuilder;
 use codex_protocol::config_types::WebSearchConfig;
 use codex_protocol::config_types::WebSearchMode;
+use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::VIEW_IMAGE_TOOL_NAME;
 use codex_protocol::openai_models::ApplyPatchToolType;
@@ -32,6 +33,7 @@ use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::WebSearchToolType;
+use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use serde::Deserialize;
@@ -125,6 +127,21 @@ pub(crate) struct ToolsConfigParams<'a> {
     pub(crate) features: &'a Features,
     pub(crate) web_search_mode: Option<WebSearchMode>,
     pub(crate) session_source: SessionSource,
+    pub(crate) sandbox_policy: &'a SandboxPolicy,
+    pub(crate) windows_sandbox_level: WindowsSandboxLevel,
+}
+
+fn unified_exec_allowed_in_environment(
+    is_windows: bool,
+    sandbox_policy: &SandboxPolicy,
+    windows_sandbox_level: WindowsSandboxLevel,
+) -> bool {
+    !(is_windows
+        && windows_sandbox_level != WindowsSandboxLevel::Disabled
+        && !matches!(
+            sandbox_policy,
+            SandboxPolicy::DangerFullAccess | SandboxPolicy::ExternalSandbox { .. }
+        ))
 }
 
 impl ToolsConfig {
@@ -135,6 +152,8 @@ impl ToolsConfig {
             features,
             web_search_mode,
             session_source,
+            sandbox_policy,
+            windows_sandbox_level,
         } = params;
         let include_apply_patch_tool = features.enabled(Feature::ApplyPatchFreeform);
         let include_code_mode = features.enabled(Feature::CodeMode);
@@ -167,17 +186,25 @@ impl ToolsConfig {
                 UnifiedExecBackendConfig::Direct
             };
 
+        let unified_exec_allowed = unified_exec_allowed_in_environment(
+            cfg!(target_os = "windows"),
+            sandbox_policy,
+            *windows_sandbox_level,
+        );
         let shell_type = if !features.enabled(Feature::ShellTool) {
             ConfigShellToolType::Disabled
         } else if features.enabled(Feature::ShellZshFork) {
             ConfigShellToolType::ShellCommand
-        } else if features.enabled(Feature::UnifiedExec) {
+        } else if features.enabled(Feature::UnifiedExec) && unified_exec_allowed {
             // If ConPTY not supported (for old Windows versions), fallback on ShellCommand.
             if codex_utils_pty::conpty_supported() {
                 ConfigShellToolType::UnifiedExec
             } else {
                 ConfigShellToolType::ShellCommand
             }
+        } else if model_info.shell_type == ConfigShellToolType::UnifiedExec && !unified_exec_allowed
+        {
+            ConfigShellToolType::ShellCommand
         } else {
             model_info.shell_type
         };
@@ -2782,6 +2809,52 @@ mod tests {
     }
 
     #[test]
+    fn unified_exec_is_blocked_for_windows_sandboxed_policies_only() {
+        assert!(!unified_exec_allowed_in_environment(
+            true,
+            &SandboxPolicy::new_read_only_policy(),
+            WindowsSandboxLevel::RestrictedToken,
+        ));
+        assert!(!unified_exec_allowed_in_environment(
+            true,
+            &SandboxPolicy::new_workspace_write_policy(),
+            WindowsSandboxLevel::RestrictedToken,
+        ));
+        assert!(unified_exec_allowed_in_environment(
+            true,
+            &SandboxPolicy::DangerFullAccess,
+            WindowsSandboxLevel::RestrictedToken,
+        ));
+        assert!(unified_exec_allowed_in_environment(
+            true,
+            &SandboxPolicy::DangerFullAccess,
+            WindowsSandboxLevel::Disabled,
+        ));
+    }
+
+    #[test]
+    fn model_provided_unified_exec_is_blocked_for_windows_sandboxed_policies() {
+        let mut model_info = model_info_from_models_json("gpt-5-codex");
+        model_info.shell_type = ConfigShellToolType::UnifiedExec;
+        let features = Features::with_defaults();
+        let config = ToolsConfig::new(&ToolsConfigParams {
+            model_info: &model_info,
+            features: &features,
+            web_search_mode: Some(WebSearchMode::Cached),
+            session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::new_workspace_write_policy(),
+            windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
+        });
+
+        let expected_shell_type = if cfg!(target_os = "windows") {
+            ConfigShellToolType::ShellCommand
+        } else {
+            ConfigShellToolType::UnifiedExec
+        };
+        assert_eq!(config.shell_type, expected_shell_type);
+    }
+
+    #[test]
     fn test_full_toolset_specs_for_gpt5_codex_unified_exec_web_search() {
         let model_info = model_info_from_models_json("gpt-5-codex");
         let mut features = Features::with_defaults();
@@ -2793,6 +2866,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Live),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&config, None, None, &[]).build();
 
@@ -2890,6 +2965,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         assert_contains_tool_names(
@@ -2981,6 +3058,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         assert_contains_tool_names(&tools, &["artifacts"]);
@@ -3004,6 +3083,8 @@ mod tests {
             session_source: SessionSource::SubAgent(SubAgentSource::Other(
                 "agent_job:test".to_string(),
             )),
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         assert_contains_tool_names(
@@ -3034,6 +3115,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         let request_user_input_tool = find_tool(&tools, "request_user_input");
@@ -3050,6 +3133,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         let request_user_input_tool = find_tool(&tools, "request_user_input");
@@ -3074,6 +3159,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         assert_lacks_tool_name(&tools, "request_permissions");
@@ -3087,6 +3174,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         let request_permissions_tool = find_tool(&tools, "request_permissions");
@@ -3110,6 +3199,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -3130,6 +3221,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         assert!(
@@ -3152,6 +3245,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -3180,6 +3275,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         assert_contains_tool_names(&tools, &["js_repl", "js_repl_reset"]);
@@ -3204,6 +3301,8 @@ mod tests {
             features: &default_features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (default_tools, _) = build_specs(&default_tools_config, None, None, &[]).build();
         assert!(
@@ -3219,6 +3318,8 @@ mod tests {
             features: &image_generation_features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (supported_tools, _) = build_specs(&supported_tools_config, None, None, &[]).build();
         assert_contains_tool_names(&supported_tools, &["image_generation"]);
@@ -3237,6 +3338,8 @@ mod tests {
             features: &image_generation_features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         assert!(
@@ -3277,6 +3380,8 @@ mod tests {
             features,
             web_search_mode,
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         let tool_names = tools.iter().map(|t| t.spec.name()).collect::<Vec<_>>();
@@ -3313,6 +3418,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -3343,6 +3450,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Live),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -3386,6 +3495,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Live),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
         .with_web_search_config(Some(web_search_config.clone()));
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
@@ -3422,6 +3533,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Live),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -3456,6 +3569,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -3481,6 +3596,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, Some(HashMap::new()), None, &[]).build();
 
@@ -3674,6 +3791,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Live),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, Some(HashMap::new()), None, &[]).build();
 
@@ -3700,6 +3819,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Live),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         assert_eq!(tools_config.shell_type, ConfigShellToolType::ShellCommand);
@@ -3728,6 +3849,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -3756,6 +3879,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
 
@@ -3790,6 +3915,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Live),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(
             &tools_config,
@@ -3880,6 +4007,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         // Intentionally construct a map with keys that would sort alphabetically.
@@ -3928,6 +4057,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         let (tools, _) = build_specs(
@@ -4074,6 +4205,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         let (tools, _) = build_specs(
@@ -4132,6 +4265,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         let (tools, _) = build_specs(
@@ -4187,6 +4322,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         let (tools, _) = build_specs(
@@ -4244,6 +4381,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         let (tools, _) = build_specs(
@@ -4453,6 +4592,8 @@ Examples of valid command strings:
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(
             &tools_config,
