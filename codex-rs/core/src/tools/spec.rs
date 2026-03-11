@@ -2941,6 +2941,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         assert_contains_tool_names(
@@ -4146,6 +4148,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, app_tools.clone(), &[]).build();
         assert_lacks_tool_name(&tools, SEARCH_TOOL_BM25_TOOL_NAME);
@@ -4159,6 +4163,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, app_tools, &[]).build();
         assert_contains_tool_names(&tools, &[SEARCH_TOOL_BM25_TOOL_NAME]);
@@ -4178,6 +4184,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         let (tools, _) = build_specs(&tools_config, None, Some(HashMap::new()), &[]).build();
@@ -4703,6 +4711,8 @@ Examples of valid command strings:
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
@@ -4733,6 +4743,8 @@ Examples of valid command strings:
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
 
         let (tools, _) = build_specs(
