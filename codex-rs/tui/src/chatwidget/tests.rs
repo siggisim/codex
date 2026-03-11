@@ -6237,6 +6237,25 @@ async fn undo_completed_clears_terminal_title_undo_state() {
     assert_eq!(chat.last_terminal_title, Some("Ready".to_string()));
 }
 
+#[tokio::test]
+async fn undo_started_refreshes_default_spinner_project_title() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.animations = true;
+    chat.refresh_terminal_title();
+    let project = chat
+        .last_terminal_title
+        .clone()
+        .expect("default title should include a project name");
+    chat.terminal_title_animation_origin = Instant::now() + Duration::from_secs(1);
+
+    chat.handle_codex_event(Event {
+        id: "turn-undo".to_string(),
+        msg: EventMsg::UndoStarted(UndoStartedEvent { message: None }),
+    });
+
+    assert_eq!(chat.last_terminal_title, Some(format!("⠋ {project}")));
+}
+
 /// The commit picker shows only commit subjects (no timestamps).
 #[tokio::test]
 async fn review_commit_picker_shows_subjects_without_timestamps() {

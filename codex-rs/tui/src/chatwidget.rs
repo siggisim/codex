@@ -1102,11 +1102,19 @@ impl ChatWidget {
         self.current_status_header = header.clone();
         self.bottom_pane
             .update_status(header, details, details_capitalization, details_max_lines);
-        if self
+        let title_uses_status = self
             .config
             .tui_terminal_title
             .as_ref()
-            .is_none_or(|items| items.iter().any(|item| item == "status"))
+            .is_some_and(|items| items.iter().any(|item| item == "status"));
+        let title_uses_spinner = self
+            .config
+            .tui_terminal_title
+            .as_ref()
+            .is_none_or(|items| items.iter().any(|item| item == "spinner"));
+        if title_uses_status
+            || (title_uses_spinner
+                && self.terminal_title_status_kind == TerminalTitleStatusKind::Undoing)
         {
             self.refresh_terminal_title();
         }
