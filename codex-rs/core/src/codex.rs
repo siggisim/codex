@@ -3335,14 +3335,39 @@ impl Session {
         &self,
         turn_context: &TurnContext,
     ) -> Vec<ResponseItem> {
+        let reference_context_item = {
+            let state = self.state.lock().await;
+            state.reference_context_item()
+        };
+        self.build_initial_context_with_reference_context_item(turn_context, reference_context_item)
+            .await
+    }
+
+    /// Build full initial context with no diff baseline.
+    ///
+    /// This is used by compaction replacement-history rebuilds, where we must
+    /// reinsert canonical current context regardless of what persisted
+    /// `reference_context_item` says.
+    pub(crate) async fn build_initial_context_without_reference_context_item(
+        &self,
+        turn_context: &TurnContext,
+    ) -> Vec<ResponseItem> {
+        self.build_initial_context_with_reference_context_item(turn_context, None)
+            .await
+    }
+
+    async fn build_initial_context_with_reference_context_item(
+        &self,
+        turn_context: &TurnContext,
+        reference_context_item: Option<TurnContextItem>,
+    ) -> Vec<ResponseItem> {
         let mut developer_envelope =
             crate::context_manager::updates::DeveloperEnvelopeBuilder::default();
         let mut contextual_user_envelope =
             crate::context_manager::updates::ContextualUserEnvelopeBuilder::default();
-        let (reference_context_item, previous_turn_settings, base_instructions) = {
+        let (previous_turn_settings, base_instructions) = {
             let state = self.state.lock().await;
             (
-                state.reference_context_item(),
                 state.previous_turn_settings(),
                 state.session_configuration.base_instructions.clone(),
             )
