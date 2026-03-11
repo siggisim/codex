@@ -9809,12 +9809,12 @@ async fn terminal_title_status_uses_plain_labels_for_transient_states_when_anima
 }
 
 #[tokio::test]
-async fn default_terminal_title_items_are_project_then_status() {
+async fn default_terminal_title_items_are_project_then_spinner() {
     let (chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
 
     assert_eq!(
         chat.configured_terminal_title_items(),
-        vec!["project".to_string(), "status".to_string()]
+        vec!["project".to_string(), "spinner".to_string()]
     );
 }
 
@@ -9829,9 +9829,9 @@ async fn terminal_title_can_render_app_name_item() {
 }
 
 #[tokio::test]
-async fn default_terminal_title_refreshes_when_status_changes() {
+async fn default_terminal_title_refreshes_when_spinner_state_changes() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
-    chat.config.animations = false;
+    chat.config.animations = true;
 
     chat.config.tui_terminal_title = None;
     let cwd = chat
@@ -9865,35 +9865,59 @@ async fn default_terminal_title_refreshes_when_status_changes() {
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| format_directory_display(&cwd, None))
         });
-    chat.last_terminal_title = Some(format!("{project} | Ready"));
+    chat.last_terminal_title = Some(project.clone());
     chat.bottom_pane.set_task_running(true);
     chat.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
+    chat.terminal_title_animation_origin = Instant::now() + Duration::from_secs(1);
 
-    chat.set_status_header("Thinking".to_string());
+    chat.refresh_terminal_title();
 
-    assert_eq!(
-        chat.last_terminal_title,
-        Some(format!("{project} | Thinking"))
-    );
+    assert_eq!(chat.last_terminal_title, Some(format!("{project} ⠋")));
 }
 
 #[tokio::test]
-async fn terminal_title_status_prefixes_spinner_when_animations_enabled() {
+async fn terminal_title_spinner_item_renders_when_animations_enabled() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.bottom_pane.set_task_running(true);
     chat.terminal_title_status_kind = TerminalTitleStatusKind::Working;
     chat.terminal_title_animation_origin = Instant::now();
 
     assert_eq!(
-        chat.terminal_title_status_text_at(chat.terminal_title_animation_origin),
-        "⠋ Working"
+        chat.terminal_title_spinner_text_at(chat.terminal_title_animation_origin),
+        Some("⠋".to_string())
     );
     assert_eq!(
-        chat.terminal_title_status_text_at(
+        chat.terminal_title_spinner_text_at(
             chat.terminal_title_animation_origin + TERMINAL_TITLE_SPINNER_INTERVAL,
         ),
-        "⠙ Working"
+        Some("⠙".to_string())
     );
+}
+
+#[tokio::test]
+async fn terminal_title_uses_spaces_around_spinner_item() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.animations = true;
+    chat.config.tui_terminal_title = Some(vec![
+        "project".to_string(),
+        "spinner".to_string(),
+        "status".to_string(),
+        "thread".to_string(),
+    ]);
+    chat.thread_name = Some("Investigate flaky test".to_string());
+    chat.bottom_pane.set_task_running(true);
+    chat.terminal_title_status_kind = TerminalTitleStatusKind::Working;
+    chat.terminal_title_animation_origin = Instant::now() + Duration::from_secs(1);
+
+    chat.refresh_terminal_title();
+
+    let title = chat
+        .last_terminal_title
+        .clone()
+        .expect("expected terminal title");
+    assert!(title.contains(" ⠋ Working | "));
+    assert!(!title.contains("| ⠋"));
+    assert!(!title.contains("⠋ |"));
 }
 
 #[tokio::test]

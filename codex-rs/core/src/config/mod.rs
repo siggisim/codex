@@ -319,7 +319,7 @@ pub struct Config {
 
     /// Ordered list of terminal title item identifiers for the TUI.
     ///
-    /// When unset, the TUI defaults to: `project` and `status`.
+    /// When unset, the TUI defaults to: `project` and `spinner`.
     pub tui_terminal_title: Option<Vec<String>>,
 
     /// Syntax highlighting theme override (kebab-case name).

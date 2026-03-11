@@ -32,7 +32,9 @@ pub(crate) enum TerminalTitleItem {
     AppName,
     /// Project root name, or a compact cwd fallback.
     Project,
-    /// Compact runtime status (Ready, spinner + Working/Thinking while active).
+    /// Animated task spinner while active.
+    Spinner,
+    /// Compact runtime status text.
     Status,
     /// Current thread title (if available).
     Thread,
@@ -49,9 +51,10 @@ impl TerminalTitleItem {
         match self {
             TerminalTitleItem::AppName => "Codex app name",
             TerminalTitleItem::Project => "Project name (falls back to current directory name)",
-            TerminalTitleItem::Status => {
-                "Compact session status (Ready, spinner + Working/Thinking while active)"
+            TerminalTitleItem::Spinner => {
+                "Animated task spinner (omitted while idle or when animations are off)"
             }
+            TerminalTitleItem::Status => "Compact session status text (Ready, Working, Thinking)",
             TerminalTitleItem::Thread => "Current thread title (omitted until available)",
             TerminalTitleItem::GitBranch => "Current Git branch (omitted when unavailable)",
             TerminalTitleItem::Model => "Current model name",
@@ -69,11 +72,24 @@ impl TerminalTitleItem {
         match self {
             TerminalTitleItem::AppName => "codex",
             TerminalTitleItem::Project => "my-project",
-            TerminalTitleItem::Status => "⠋ Working",
+            TerminalTitleItem::Spinner => "⠋",
+            TerminalTitleItem::Status => "Working",
             TerminalTitleItem::Thread => "Investigate flaky test",
             TerminalTitleItem::GitBranch => "feat/awesome-feature",
             TerminalTitleItem::Model => "gpt-5.2-codex",
             TerminalTitleItem::TaskProgress => "Tasks 2/5",
+        }
+    }
+
+    pub(crate) fn separator_from_previous(self, previous: Option<Self>) -> &'static str {
+        match previous {
+            None => "",
+            Some(previous)
+                if previous == TerminalTitleItem::Spinner || self == TerminalTitleItem::Spinner =>
+            {
+                " "
+            }
+            Some(_) => " | ",
         }
     }
 }
@@ -143,12 +159,13 @@ impl TerminalTitleSetupView {
                         .filter(|item| item.enabled)
                         .map(|item| item.id.as_str()),
                 )?;
-                let preview = items
-                    .iter()
-                    .copied()
-                    .map(TerminalTitleItem::preview_example)
-                    .collect::<Vec<_>>()
-                    .join(" | ");
+                let mut preview = String::new();
+                let mut previous = None;
+                for item in items.iter().copied() {
+                    preview.push_str(item.separator_from_previous(previous));
+                    preview.push_str(item.preview_example());
+                    previous = Some(item);
+                }
                 if preview.is_empty() {
                     None
                 } else {
@@ -250,6 +267,7 @@ mod tests {
         let tx = AppEventSender::new(tx_raw);
         let selected = [
             "project".to_string(),
+            "spinner".to_string(),
             "status".to_string(),
             "thread".to_string(),
         ];
@@ -259,11 +277,13 @@ mod tests {
 
     #[test]
     fn parse_terminal_title_items_preserves_order() {
-        let items = parse_terminal_title_items(["project", "status", "thread"].into_iter());
+        let items =
+            parse_terminal_title_items(["project", "spinner", "status", "thread"].into_iter());
         assert_eq!(
             items,
             Some(vec![
                 TerminalTitleItem::Project,
+                TerminalTitleItem::Spinner,
                 TerminalTitleItem::Status,
                 TerminalTitleItem::Thread,
             ])

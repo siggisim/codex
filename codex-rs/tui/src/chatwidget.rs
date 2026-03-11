@@ -2689,7 +2689,7 @@ impl ChatWidget {
 
     pub(crate) fn pre_draw_tick(&mut self) {
         self.bottom_pane.pre_draw_tick();
-        if self.should_animate_terminal_title_status() {
+        if self.should_animate_terminal_title_spinner() {
             self.refresh_terminal_title();
         }
     }

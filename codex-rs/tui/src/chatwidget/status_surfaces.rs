@@ -5,7 +5,7 @@
 
 use super::*;
 
-pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 2] = ["project", "status"];
+pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 2] = ["project", "spinner"];
 pub(super) const TERMINAL_TITLE_SPINNER_FRAMES: [&str; 10] =
     ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 pub(super) const TERMINAL_TITLE_SPINNER_INTERVAL: Duration = Duration::from_millis(100);
@@ -170,8 +170,8 @@ impl ChatWidget {
     /// Empty selections clear the managed title. Non-empty selections render the
     /// current values in configured order, skip unavailable segments, and cache
     /// the last successfully written title so redundant OSC writes are avoided.
-    /// When the `status` item is present in an animated running state, this also
-    /// schedules the next frame so spinner-prefixed labels continue updating.
+    /// When the `spinner` item is present in an animated running state, this also
+    /// schedules the next frame so the spinner keeps advancing.
     fn refresh_terminal_title_from_selections(&mut self, selections: &StatusSurfaceSelections) {
         if selections.terminal_title_items.is_empty() {
             if let Err(err) = self.clear_managed_terminal_title() {
@@ -180,13 +180,22 @@ impl ChatWidget {
             return;
         }
 
+        let now = Instant::now();
+        let mut previous = None;
         let title = selections
             .terminal_title_items
             .iter()
             .copied()
-            .filter_map(|item| self.terminal_title_value_for_item(item))
-            .collect::<Vec<_>>()
-            .join(" | ");
+            .filter_map(|item| {
+                self.terminal_title_value_for_item(item, now)
+                    .map(|value| (item, value))
+            })
+            .fold(String::new(), |mut title, (item, value)| {
+                title.push_str(item.separator_from_previous(previous));
+                title.push_str(&value);
+                previous = Some(item);
+                title
+            });
         let title = (!title.is_empty()).then_some(title);
         if self.last_terminal_title == title {
             return;
@@ -212,7 +221,7 @@ impl ChatWidget {
             }
         }
 
-        if self.should_animate_terminal_title_status_with_selections(selections) {
+        if self.should_animate_terminal_title_spinner_with_selections(selections) {
             self.frame_requester
                 .schedule_frame_in(TERMINAL_TITLE_SPINNER_INTERVAL);
         }
@@ -500,11 +509,16 @@ impl ChatWidget {
     ///
     /// Returning `None` means "omit this segment for now" so callers can keep
     /// the configured order while hiding values that are not yet available.
-    fn terminal_title_value_for_item(&mut self, item: TerminalTitleItem) -> Option<String> {
+    fn terminal_title_value_for_item(
+        &mut self,
+        item: TerminalTitleItem,
+        now: Instant,
+    ) -> Option<String> {
         match item {
             TerminalTitleItem::AppName => Some("codex".to_string()),
             TerminalTitleItem::Project => self.terminal_title_project_name(),
-            TerminalTitleItem::Status => Some(self.terminal_title_status_text_at(Instant::now())),
+            TerminalTitleItem::Spinner => self.terminal_title_spinner_text_at(now),
+            TerminalTitleItem::Status => Some(self.terminal_title_status_text()),
             TerminalTitleItem::Thread => self.thread_name.as_ref().and_then(|name| {
                 let trimmed = name.trim();
                 if trimmed.is_empty() {
@@ -528,17 +542,10 @@ impl ChatWidget {
     /// Computes the compact runtime status label used by the terminal title.
     ///
     /// Startup takes precedence over normal task states, and idle state renders
-    /// as `Ready` regardless of the last active status bucket. When animations
-    /// are enabled, active states get a spinner prefix instead of a static
-    /// trailing ellipsis.
-    #[cfg(test)]
+    /// as `Ready` regardless of the last active status bucket.
     pub(super) fn terminal_title_status_text(&self) -> String {
-        self.terminal_title_status_text_at(Instant::now())
-    }
-
-    pub(super) fn terminal_title_status_text_at(&self, now: Instant) -> String {
         if self.mcp_startup_status.is_some() {
-            return self.animated_terminal_title_status("Starting", now);
+            return "Starting".to_string();
         }
 
         if !self.bottom_pane.is_task_running() {
@@ -546,23 +553,23 @@ impl ChatWidget {
         }
 
         match self.terminal_title_status_kind {
-            TerminalTitleStatusKind::Working => self.animated_terminal_title_status("Working", now),
-            TerminalTitleStatusKind::WaitingForBackgroundTerminal => {
-                self.animated_terminal_title_status("Waiting", now)
-            }
-            TerminalTitleStatusKind::Undoing => self.animated_terminal_title_status("Undoing", now),
-            TerminalTitleStatusKind::Thinking => {
-                self.animated_terminal_title_status("Thinking", now)
-            }
+            TerminalTitleStatusKind::Working => "Working".to_string(),
+            TerminalTitleStatusKind::WaitingForBackgroundTerminal => "Waiting".to_string(),
+            TerminalTitleStatusKind::Undoing => "Undoing".to_string(),
+            TerminalTitleStatusKind::Thinking => "Thinking".to_string(),
         }
     }
 
-    fn animated_terminal_title_status(&self, label: &str, now: Instant) -> String {
+    pub(super) fn terminal_title_spinner_text_at(&self, now: Instant) -> Option<String> {
         if !self.config.animations {
-            return label.to_string();
+            return None;
         }
 
-        format!("{} {label}", self.terminal_title_spinner_frame_at(now))
+        if self.mcp_startup_status.is_none() && !self.bottom_pane.is_task_running() {
+            return None;
+        }
+
+        Some(self.terminal_title_spinner_frame_at(now).to_string())
     }
 
     fn terminal_title_spinner_frame_at(&self, now: Instant) -> &'static str {
@@ -572,27 +579,27 @@ impl ChatWidget {
         TERMINAL_TITLE_SPINNER_FRAMES[frame_index % TERMINAL_TITLE_SPINNER_FRAMES.len()]
     }
 
-    fn terminal_title_uses_status(&self) -> bool {
+    fn terminal_title_uses_spinner(&self) -> bool {
         self.config
             .tui_terminal_title
             .as_ref()
-            .is_none_or(|items| items.iter().any(|item| item == "status"))
+            .is_none_or(|items| items.iter().any(|item| item == "spinner"))
     }
 
-    pub(super) fn should_animate_terminal_title_status(&self) -> bool {
+    pub(super) fn should_animate_terminal_title_spinner(&self) -> bool {
         self.config.animations
-            && self.terminal_title_uses_status()
+            && self.terminal_title_uses_spinner()
             && (self.mcp_startup_status.is_some() || self.bottom_pane.is_task_running())
     }
 
-    fn should_animate_terminal_title_status_with_selections(
+    fn should_animate_terminal_title_spinner_with_selections(
         &self,
         selections: &StatusSurfaceSelections,
     ) -> bool {
         self.config.animations
             && selections
                 .terminal_title_items
-                .contains(&TerminalTitleItem::Status)
+                .contains(&TerminalTitleItem::Spinner)
             && (self.mcp_startup_status.is_some() || self.bottom_pane.is_task_running())
     }
 
