@@ -2837,8 +2837,10 @@ mod tests {
         let mut model_info = model_info_from_models_json("gpt-5-codex");
         model_info.shell_type = ConfigShellToolType::UnifiedExec;
         let features = Features::with_defaults();
+        let available_models = Vec::new();
         let config = ToolsConfig::new(&ToolsConfigParams {
             model_info: &model_info,
+            available_models: &available_models,
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
