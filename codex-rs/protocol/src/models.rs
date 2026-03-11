@@ -1819,6 +1819,7 @@ mod tests {
             AskForApproval::Reject(RejectConfig {
                 sandbox_approval: true,
                 rules: false,
+                skill_approval: false,
                 request_permissions: true,
                 mcp_elicitations: false,
             }),
