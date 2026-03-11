@@ -1,8 +1,6 @@
 mod developer_update_fragments;
 
 use crate::codex::TurnContext;
-use crate::environment_context::EnvironmentContext;
-use crate::instructions::AgentsMdInstructions;
 use crate::model_visible_context::ContextualUserContextRole;
 use crate::model_visible_context::ContextualUserTextFragment;
 use crate::model_visible_context::DeveloperContextRole;
@@ -28,78 +26,46 @@ pub(crate) struct TurnStateEnvelopeFragments {
     pub(crate) contextual_user: Vec<ContextualUserTextFragment>,
 }
 
-enum RegisteredTurnStateFragment {
-    Developer(DeveloperTextFragment),
-    ContextualUser(ContextualUserTextFragment),
-}
-
-trait RegisteredTurnStateFragmentRole: ModelVisibleContextRole {
-    fn into_registered_fragment(text: String) -> RegisteredTurnStateFragment;
-}
-
-impl RegisteredTurnStateFragmentRole for DeveloperContextRole {
-    fn into_registered_fragment(text: String) -> RegisteredTurnStateFragment {
-        RegisteredTurnStateFragment::Developer(DeveloperTextFragment::new(text))
-    }
-}
-
-impl RegisteredTurnStateFragmentRole for ContextualUserContextRole {
-    fn into_registered_fragment(text: String) -> RegisteredTurnStateFragment {
-        RegisteredTurnStateFragment::ContextualUser(ContextualUserTextFragment::new(text))
-    }
-}
-
-type RegisteredTurnStateFragmentBuilder = fn(
+type DeveloperTurnStateFragmentBuilder = fn(
     Option<&TurnContextItem>,
     &TurnContext,
     &TurnContextDiffParams<'_>,
-) -> Option<RegisteredTurnStateFragment>;
+) -> Option<DeveloperTextFragment>;
 
-fn build_registered_turn_state_fragment<F>(
+fn build_developer_turn_state_fragment<F>(
     reference_context_item: Option<&TurnContextItem>,
     turn_context: &TurnContext,
     params: &TurnContextDiffParams<'_>,
-) -> Option<RegisteredTurnStateFragment>
+) -> Option<DeveloperTextFragment>
 where
-    F: TurnContextDiffFragment,
-    F::Role: RegisteredTurnStateFragmentRole,
+    F: TurnContextDiffFragment<Role = DeveloperContextRole>,
 {
     let fragment = F::build(turn_context, reference_context_item, params)?;
-    Some(
-        <F::Role as RegisteredTurnStateFragmentRole>::into_registered_fragment(
-            fragment.render_text(),
-        ),
-    )
+    Some(DeveloperTextFragment::new(fragment.render_text()))
 }
 
-/// Canonical ordered registry for all turn-state model-visible fragments.
+/// Canonical ordered registry for all turn-state developer fragments.
 ///
 /// Add new turn-state fragments by:
 /// 1. Defining a typed fragment struct.
-/// 2. Implementing `ModelVisibleContextFragment` (with the right `Role`).
+/// 2. Implementing `ModelVisibleContextFragment` with `Role = DeveloperContextRole`.
 /// 3. Implementing `TurnContextDiffFragment::build`.
-/// 4. Registering the type here with `build_registered_turn_state_fragment::<YourType>`.
-///
-/// Ordering is intentional and follows prompt layout:
-/// - developer-envelope fragments first
-/// - contextual-user-envelope fragments next
-const REGISTERED_TURN_STATE_FRAGMENT_BUILDERS: &[RegisteredTurnStateFragmentBuilder] = &[
+/// 4. Registering the type here with `build_developer_turn_state_fragment::<YourType>`.
+const REGISTERED_DEVELOPER_TURN_STATE_FRAGMENT_BUILDERS: &[DeveloperTurnStateFragmentBuilder] = &[
     // Keep model-switch instructions first so model-specific guidance is read
     // before any other developer context on this turn.
-    build_registered_turn_state_fragment::<
+    build_developer_turn_state_fragment::<
         developer_update_fragments::ModelInstructionsUpdateFragment,
     >,
-    build_registered_turn_state_fragment::<developer_update_fragments::PermissionsUpdateFragment>,
-    build_registered_turn_state_fragment::<
+    build_developer_turn_state_fragment::<developer_update_fragments::PermissionsUpdateFragment>,
+    build_developer_turn_state_fragment::<
         developer_update_fragments::CustomDeveloperInstructionsUpdateFragment,
     >,
-    build_registered_turn_state_fragment::<
+    build_developer_turn_state_fragment::<
         developer_update_fragments::CollaborationModeUpdateFragment,
     >,
-    build_registered_turn_state_fragment::<developer_update_fragments::RealtimeUpdateFragment>,
-    build_registered_turn_state_fragment::<developer_update_fragments::PersonalityUpdateFragment>,
-    build_registered_turn_state_fragment::<AgentsMdInstructions>,
-    build_registered_turn_state_fragment::<EnvironmentContext>,
+    build_developer_turn_state_fragment::<developer_update_fragments::RealtimeUpdateFragment>,
+    build_developer_turn_state_fragment::<developer_update_fragments::PersonalityUpdateFragment>,
 ];
 
 // Adjacent ContentItems in a single message are effectively concatenated in
@@ -204,18 +170,18 @@ pub(crate) fn build_turn_state_envelope_fragments(
         contextual_user: Vec::new(),
     };
 
-    for build in REGISTERED_TURN_STATE_FRAGMENT_BUILDERS {
+    for build in REGISTERED_DEVELOPER_TURN_STATE_FRAGMENT_BUILDERS {
         if let Some(fragment) = build(reference_context_item, next, params) {
-            match fragment {
-                RegisteredTurnStateFragment::Developer(fragment) => {
-                    fragments.developer.push(fragment)
-                }
-                RegisteredTurnStateFragment::ContextualUser(fragment) => {
-                    fragments.contextual_user.push(fragment);
-                }
-            }
+            fragments.developer.push(fragment);
         }
     }
+
+    fragments.contextual_user =
+        crate::model_visible_context::build_contextual_user_turn_state_fragments(
+            reference_context_item,
+            next,
+            params,
+        );
 
     fragments
 }

@@ -150,9 +150,7 @@ async fn snapshot_model_visible_layout_turn_overrides() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-// TODO(ccunningham): Diff `user_instructions` and emit updates when AGENTS.md content changes
-// (for example after cwd changes), then update this test to assert refreshed AGENTS content.
-async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> Result<()> {
+async fn snapshot_model_visible_layout_cwd_change_refreshes_agents() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -243,13 +241,13 @@ async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> R
     );
     assert_eq!(
         agents_message_count(&requests[1]),
-        1,
-        "expected AGENTS to refresh after cwd change, but current behavior only keeps history AGENTS"
+        2,
+        "expected updated AGENTS instructions to be re-injected after cwd change"
     );
     insta::assert_snapshot!(
-        "model_visible_layout_cwd_change_does_not_refresh_agents",
+        "model_visible_layout_cwd_change_refreshes_agents",
         format_labeled_requests_snapshot(
-            "Second turn changes cwd to a directory with different AGENTS.md; current behavior does not emit refreshed AGENTS instructions.",
+            "Second turn changes cwd to a directory with different AGENTS.md; updated AGENTS instructions are re-injected.",
             &[
                 ("First Request (agents_one)", &requests[0]),
                 ("Second Request (agents_two cwd)", &requests[1]),

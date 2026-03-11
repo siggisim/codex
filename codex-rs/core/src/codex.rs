@@ -168,7 +168,6 @@ use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
 #[cfg(test)]
 use crate::exec::StreamOutput;
-use crate::model_visible_context::ContextualUserTextFragment;
 use crate::model_visible_context::DeveloperTextFragment;
 use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::model_visible_context::TurnContextDiffParams;
@@ -2656,23 +2655,8 @@ impl Session {
             return;
         };
         let text = format!("Approved command prefix saved:\n{prefixes}");
-
-        if let Some(turn_context) = self.turn_context_for_sub_id(sub_id).await {
-            let message = DeveloperTextFragment::new(text.clone()).into_message();
-            self.record_conversation_items(&turn_context, std::slice::from_ref(&message))
-                .await;
-            return;
-        }
-
-        if self
-            .inject_response_items(vec![
-                DeveloperTextFragment::new(text).into_response_input_item(),
-            ])
-            .await
-            .is_err()
-        {
-            warn!("no active turn found to record execpolicy amendment message for {sub_id}");
-        }
+        self.record_or_inject_developer_text_for_sub_id(sub_id, text)
+            .await;
     }
 
     pub(crate) async fn persist_network_policy_amendment(
@@ -2752,7 +2736,11 @@ impl Session {
             "{action} network rule saved in execpolicy ({list_name}): {}",
             amendment.host
         );
+        self.record_or_inject_developer_text_for_sub_id(sub_id, text)
+            .await;
+    }
 
+    async fn record_or_inject_developer_text_for_sub_id(&self, sub_id: &str, text: String) {
         if let Some(turn_context) = self.turn_context_for_sub_id(sub_id).await {
             let message = DeveloperTextFragment::new(text.clone()).into_message();
             self.record_conversation_items(&turn_context, std::slice::from_ref(&message))
@@ -2767,7 +2755,7 @@ impl Session {
             .await
             .is_err()
         {
-            warn!("no active turn found to record network policy amendment message for {sub_id}");
+            warn!("no active turn found to record amendment message for {sub_id}");
         }
     }
 
@@ -3415,8 +3403,7 @@ impl Session {
             contextual_user_envelope.push_fragment(fragment);
         }
         if let Some(fragment) = render_plugin_instructions(loaded_plugins.capability_summaries()) {
-            contextual_user_envelope
-                .push_fragment(ContextualUserTextFragment::new(fragment.render_text()));
+            contextual_user_envelope.push_fragment(fragment);
         }
         let subagents = self
             .services

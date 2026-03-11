@@ -144,32 +144,32 @@ impl TurnContextDiffFragment for EnvironmentContext {
         reference_context_item: Option<&TurnContextItem>,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
-        let from_turn_context = || {
-            Some(Self::new(
-                Some(turn_context.cwd.clone()),
-                params.shell.clone(),
-                turn_context.current_date.clone(),
-                turn_context.timezone.clone(),
-                Self::network_from_turn_context(turn_context),
-            ))
-        };
+        let current_network = Self::network_from_turn_context(turn_context);
+        let current_context = Self::new(
+            Some(turn_context.cwd.clone()),
+            params.shell.clone(),
+            turn_context.current_date.clone(),
+            turn_context.timezone.clone(),
+            current_network.clone(),
+        );
+
         let Some(previous) = reference_context_item else {
-            return from_turn_context();
+            return Some(current_context);
         };
+
+        let previous_network = Self::network_from_turn_context_item(previous);
         let previous_context = Self::new(
             Some(previous.cwd.clone()),
             params.shell.clone(),
             previous.current_date.clone(),
             previous.timezone.clone(),
-            Self::network_from_turn_context_item(previous),
+            previous_network.clone(),
         );
-        let next_context = from_turn_context()?;
-        if previous_context.equals_except_shell(&next_context) {
+
+        if previous_context.equals_except_shell(&current_context) {
             return None;
         }
 
-        let previous_network = Self::network_from_turn_context_item(previous);
-        let current_network = Self::network_from_turn_context(turn_context);
         let cwd = if previous.cwd != turn_context.cwd {
             Some(turn_context.cwd.clone())
         } else {
@@ -345,16 +345,6 @@ mod tests {
             EnvironmentContext::new(Some(PathBuf::from("/repo")), fake_shell(), None, None, None);
         let context2 =
             EnvironmentContext::new(Some(PathBuf::from("/repo")), fake_shell(), None, None, None);
-        assert!(context1.equals_except_shell(&context2));
-    }
-
-    #[test]
-    fn equals_except_shell_ignores_sandbox_policy() {
-        let context1 =
-            EnvironmentContext::new(Some(PathBuf::from("/repo")), fake_shell(), None, None, None);
-        let context2 =
-            EnvironmentContext::new(Some(PathBuf::from("/repo")), fake_shell(), None, None, None);
-
         assert!(context1.equals_except_shell(&context2));
     }
 

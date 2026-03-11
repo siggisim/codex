@@ -1587,6 +1587,7 @@ prefix_rule(pattern=["git"], decision="prompt")
                 AskForApproval::Reject(RejectConfig {
                     sandbox_approval: false,
                     rules: false,
+                    skill_approval: false,
                     request_permissions: false,
                     mcp_elicitations: false,
                 }),

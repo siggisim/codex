@@ -170,6 +170,30 @@ impl ContextualUserTextFragment {
     }
 }
 
+type ContextualUserTurnStateBuilder = fn(
+    Option<&TurnContextItem>,
+    &TurnContext,
+    &TurnContextDiffParams<'_>,
+) -> Option<ContextualUserTextFragment>;
+
+#[derive(Clone, Copy)]
+struct ContextualUserFragmentRegistration {
+    detect: fn(&str) -> bool,
+    turn_state_builder: Option<ContextualUserTurnStateBuilder>,
+}
+
+impl ContextualUserFragmentRegistration {
+    const fn new(
+        detect: fn(&str) -> bool,
+        turn_state_builder: Option<ContextualUserTurnStateBuilder>,
+    ) -> Self {
+        Self {
+            detect,
+            turn_state_builder,
+        }
+    }
+}
+
 pub(crate) struct TurnContextDiffParams<'a> {
     pub(crate) shell: &'a Shell,
     pub(crate) previous_turn_settings: Option<&'a PreviousTurnSettings>,
@@ -219,17 +243,58 @@ pub(crate) trait TurnContextDiffFragment: ModelVisibleContextFragment + Sized {
     ) -> Option<Self>;
 }
 
-/// Canonical contextual-user detection registry used by history parsing.
+fn detect_contextual_user_fragment<F: ContextualUserFragmentDetector>(text: &str) -> bool {
+    F::matches_contextual_user_text(text)
+}
+
+fn build_contextual_user_turn_state_fragment<F>(
+    reference_context_item: Option<&TurnContextItem>,
+    turn_context: &TurnContext,
+    params: &TurnContextDiffParams<'_>,
+) -> Option<ContextualUserTextFragment>
+where
+    F: TurnContextDiffFragment<Role = ContextualUserContextRole>,
+{
+    let fragment = F::build(turn_context, reference_context_item, params)?;
+    Some(ContextualUserTextFragment::new(fragment.render_text()))
+}
+
+/// Canonical contextual-user fragment registry.
 ///
 /// Add new contextual-user fragment types here so injected context is not
-/// mistaken for real user intent during event mapping and truncation.
-const CONTEXTUAL_USER_FRAGMENT_DETECTORS: &[fn(&str) -> bool] = &[
-    <crate::instructions::AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text,
-    <crate::environment_context::EnvironmentContext as ContextualUserFragmentDetector>::matches_contextual_user_text,
-    <crate::instructions::SkillInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text,
-    <crate::instructions::PluginInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text,
-    <crate::user_shell_command::UserShellCommandFragment as ContextualUserFragmentDetector>::matches_contextual_user_text,
-    <crate::tasks::TurnAbortedMarker as ContextualUserFragmentDetector>::matches_contextual_user_text,
+/// mistaken for real user intent during event mapping/truncation, and to wire
+/// turn-state contextual-user diff fragments in one place.
+const REGISTERED_CONTEXTUAL_USER_FRAGMENTS: &[ContextualUserFragmentRegistration] = &[
+    ContextualUserFragmentRegistration::new(
+        detect_contextual_user_fragment::<crate::instructions::AgentsMdInstructions>,
+        Some(
+            build_contextual_user_turn_state_fragment::<crate::instructions::AgentsMdInstructions>,
+        ),
+    ),
+    ContextualUserFragmentRegistration::new(
+        detect_contextual_user_fragment::<crate::environment_context::EnvironmentContext>,
+        Some(
+            build_contextual_user_turn_state_fragment::<
+                crate::environment_context::EnvironmentContext,
+            >,
+        ),
+    ),
+    ContextualUserFragmentRegistration::new(
+        detect_contextual_user_fragment::<crate::instructions::SkillInstructions>,
+        None,
+    ),
+    ContextualUserFragmentRegistration::new(
+        detect_contextual_user_fragment::<crate::instructions::PluginInstructions>,
+        None,
+    ),
+    ContextualUserFragmentRegistration::new(
+        detect_contextual_user_fragment::<crate::user_shell_command::UserShellCommandFragment>,
+        None,
+    ),
+    ContextualUserFragmentRegistration::new(
+        detect_contextual_user_fragment::<crate::tasks::TurnAbortedMarker>,
+        None,
+    ),
 ];
 
 pub(crate) fn is_agents_md_fragment(text: &str) -> bool {
@@ -251,9 +316,24 @@ pub(crate) fn is_contextual_user_fragment(content_item: &ContentItem) -> bool {
     let ContentItem::InputText { text } = content_item else {
         return false;
     };
-    CONTEXTUAL_USER_FRAGMENT_DETECTORS
+    REGISTERED_CONTEXTUAL_USER_FRAGMENTS
         .iter()
-        .any(|detect| detect(text))
+        .any(|registration| (registration.detect)(text))
+}
+
+pub(crate) fn build_contextual_user_turn_state_fragments(
+    reference_context_item: Option<&TurnContextItem>,
+    turn_context: &TurnContext,
+    params: &TurnContextDiffParams<'_>,
+) -> Vec<ContextualUserTextFragment> {
+    REGISTERED_CONTEXTUAL_USER_FRAGMENTS
+        .iter()
+        .filter_map(|registration| {
+            registration
+                .turn_state_builder
+                .and_then(|build| build(reference_context_item, turn_context, params))
+        })
+        .collect()
 }
 
 impl ModelVisibleContextFragment for CustomDeveloperInstructions {
