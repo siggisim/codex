@@ -2999,6 +2999,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         let view_image = find_tool(&tools, VIEW_IMAGE_TOOL_NAME);
@@ -3026,6 +3028,8 @@ mod tests {
             features: &features,
             web_search_mode: Some(WebSearchMode::Cached),
             session_source: SessionSource::Cli,
+            sandbox_policy: &SandboxPolicy::DangerFullAccess,
+            windows_sandbox_level: WindowsSandboxLevel::Disabled,
         });
         let (tools, _) = build_specs(&tools_config, None, None, &[]).build();
         let view_image = find_tool(&tools, VIEW_IMAGE_TOOL_NAME);
