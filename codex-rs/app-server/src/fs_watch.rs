@@ -15,6 +15,7 @@ use notify::EventKind;
 use notify::RecommendedWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io;
@@ -23,11 +24,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use std::time::SystemTime;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
+
+const FS_CHANGED_NOTIFICATION_DEBOUNCE: Duration = Duration::from_millis(200);
 
 #[derive(Clone)]
 pub(crate) struct FsWatchManager {
@@ -53,6 +57,8 @@ struct FsWatchSubscription {
     path: PathBuf,
     filter_path: Option<PathBuf>,
     last_observed_state: Option<ObservedPathState>,
+    pending_changed_paths: BTreeSet<PathBuf>,
+    notification_tx: mpsc::Sender<()>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -104,6 +110,7 @@ impl FsWatchManager {
             connection_id,
             watch_id: watch_id.clone(),
         };
+        let (notification_tx, notification_rx) = mpsc::channel(1);
         let subscription = FsWatchSubscription {
             path: resolved.path.clone(),
             filter_path: resolved.filter_path.clone(),
@@ -114,20 +121,24 @@ impl FsWatchManager {
             } else {
                 None
             },
+            pending_changed_paths: BTreeSet::new(),
+            notification_tx,
         };
 
-        let mut maybe_task = None;
+        let mut maybe_watch_task = None;
+        let notification_task;
         {
             let mut state = self.state.lock().await;
-            if let Some(subscriptions) = state
-                .entries
-                .get(&resolved.watch_path_key)
-                .map(|entry| entry.subscriptions.clone())
-            {
+            if let Some(entry) = state.entries.get(&resolved.watch_path_key) {
+                let subscriptions = entry.subscriptions.clone();
                 state
                     .watch_index
                     .insert(watch_key.clone(), resolved.watch_path_key.clone());
-                subscriptions.lock().await.insert(watch_key, subscription);
+                subscriptions
+                    .lock()
+                    .await
+                    .insert(watch_key.clone(), subscription);
+                notification_task = (subscriptions, notification_rx);
             } else {
                 let (raw_tx, raw_rx) = mpsc::unbounded_channel();
                 let mut watcher = notify::recommended_watcher(move |res| {
@@ -153,19 +164,21 @@ impl FsWatchManager {
                 );
                 state
                     .watch_index
-                    .insert(watch_key, resolved.watch_path_key.clone());
-                maybe_task = Some((
+                    .insert(watch_key.clone(), resolved.watch_path_key.clone());
+                maybe_watch_task = Some((
                     resolved.watch_path_key.clone(),
-                    subscriptions,
+                    subscriptions.clone(),
                     cancel,
                     raw_rx,
                 ));
+                notification_task = (subscriptions, notification_rx);
             }
         }
 
-        if let Some((watch_path_key, subscriptions, cancel, raw_rx)) = maybe_task {
+        if let Some((watch_path_key, subscriptions, cancel, raw_rx)) = maybe_watch_task {
             self.spawn_watch_task(watch_path_key, subscriptions, cancel, raw_rx);
         }
+        self.spawn_notification_task(watch_key, notification_task.0, notification_task.1);
 
         Ok(FsWatchResponse {
             watch_id,
@@ -237,12 +250,11 @@ impl FsWatchManager {
 
     fn spawn_watch_task(
         &self,
-        watch_key: WatchPathKey,
+        watch_path_key: WatchPathKey,
         subscriptions: Arc<AsyncMutex<HashMap<WatchKey, FsWatchSubscription>>>,
         cancel: CancellationToken,
         mut raw_rx: mpsc::UnboundedReceiver<notify::Result<Event>>,
     ) {
-        let outgoing = self.outgoing.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -254,26 +266,61 @@ impl FsWatchManager {
                                     continue;
                                 }
 
-                                let notifications = {
+                                {
                                     let mut subscriptions = subscriptions.lock().await;
-                                    notifications_for_event(&mut subscriptions, &watch_key.path, &event)
-                                        .await
-                                };
-                                for (connection_id, notification) in notifications {
-                                    outgoing
-                                        .send_server_notification_to_connections(
-                                            &[connection_id],
-                                            ServerNotification::FsChanged(notification),
-                                        )
+                                    notifications_for_event(&mut subscriptions, &watch_path_key.path, &event)
                                         .await;
-                                }
+                                };
                             }
                             Some(Err(err)) => {
-                                warn!("filesystem watch error for {}: {err}", watch_key.path.display());
+                                warn!(
+                                    "filesystem watch error for {}: {err}",
+                                    watch_path_key.path.display()
+                                );
                             }
                             None => break,
                         }
                     }
+                }
+            }
+        });
+    }
+
+    fn spawn_notification_task(
+        &self,
+        watch_key: WatchKey,
+        subscriptions: Arc<AsyncMutex<HashMap<WatchKey, FsWatchSubscription>>>,
+        mut notification_rx: mpsc::Receiver<()>,
+    ) {
+        let outgoing = self.outgoing.clone();
+        tokio::spawn(async move {
+            while notification_rx.recv().await.is_some() {
+                tokio::time::sleep(FS_CHANGED_NOTIFICATION_DEBOUNCE).await;
+
+                let changed_paths = {
+                    let mut subscriptions = subscriptions.lock().await;
+                    let Some(subscription) = subscriptions.get_mut(&watch_key) else {
+                        return;
+                    };
+                    while notification_rx.try_recv().is_ok() {}
+                    if subscription.pending_changed_paths.is_empty() {
+                        continue;
+                    }
+                    std::mem::take(&mut subscription.pending_changed_paths)
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                };
+
+                for changed_path in changed_paths {
+                    outgoing
+                        .send_server_notification_to_connections(
+                            &[watch_key.connection_id],
+                            ServerNotification::FsChanged(FsChangedNotification {
+                                watch_id: watch_key.watch_id.clone(),
+                                changed_path,
+                            }),
+                        )
+                        .await;
                 }
             }
         });
@@ -284,12 +331,12 @@ async fn notifications_for_event(
     subscriptions: &mut HashMap<WatchKey, FsWatchSubscription>,
     watch_root: &Path,
     event: &Event,
-) -> Vec<(ConnectionId, FsChangedNotification)> {
+) {
     let event_is_ambiguous_for_file_subscriptions =
         event.paths.is_empty() || event.paths.iter().all(|path| path == watch_root);
-    let mut notifications = Vec::new();
 
-    for (watch_id, subscription) in subscriptions.iter_mut() {
+    for subscription in subscriptions.values_mut() {
+        let mut changed_paths_were_mutated = false;
         if let Some(filter_path) = &subscription.filter_path {
             let is_relevant = if event_is_ambiguous_for_file_subscriptions {
                 match observe_path_state(&subscription.path).await {
@@ -327,48 +374,34 @@ async fn notifications_for_event(
                 is_relevant
             };
             if is_relevant {
-                notifications.push((
-                    watch_id.connection_id,
-                    FsChangedNotification {
-                        watch_id: watch_id.watch_id.clone(),
-                        changed_path: subscription.path.clone(),
-                    },
-                ));
+                changed_paths_were_mutated = subscription
+                    .pending_changed_paths
+                    .insert(subscription.path.clone());
             }
-            continue;
+        } else if event.paths.is_empty() {
+            changed_paths_were_mutated = subscription
+                .pending_changed_paths
+                .insert(subscription.path.clone());
+        } else {
+            let mut seen_paths = HashSet::new();
+            for changed_path in &event.paths {
+                let changed_path = if changed_path == watch_root {
+                    subscription.path.clone()
+                } else {
+                    changed_path.clone()
+                };
+                if seen_paths.insert(changed_path.clone())
+                    && subscription.pending_changed_paths.insert(changed_path)
+                {
+                    changed_paths_were_mutated = true;
+                }
+            }
         }
 
-        if event.paths.is_empty() {
-            notifications.push((
-                watch_id.connection_id,
-                FsChangedNotification {
-                    watch_id: watch_id.watch_id.clone(),
-                    changed_path: subscription.path.clone(),
-                },
-            ));
-            continue;
-        }
-
-        let mut seen_paths = HashSet::new();
-        for changed_path in &event.paths {
-            let changed_path = if changed_path == watch_root {
-                subscription.path.clone()
-            } else {
-                changed_path.clone()
-            };
-            if seen_paths.insert(changed_path.clone()) {
-                notifications.push((
-                    watch_id.connection_id,
-                    FsChangedNotification {
-                        watch_id: watch_id.watch_id.clone(),
-                        changed_path,
-                    },
-                ));
-            }
+        if changed_paths_were_mutated {
+            let _ = subscription.notification_tx.try_send(());
         }
     }
-
-    notifications
 }
 
 async fn observe_path_state(path: &Path) -> io::Result<Option<ObservedPathState>> {
@@ -462,16 +495,37 @@ fn map_notify_error(err: notify::Error) -> JSONRPCErrorError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::outgoing_message::OutgoingEnvelope;
+    use crate::outgoing_message::OutgoingMessage;
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
-    async fn file_subscription(path: &Path) -> FsWatchSubscription {
-        FsWatchSubscription {
-            path: path.to_path_buf(),
-            filter_path: Some(path.to_path_buf()),
-            last_observed_state: observe_path_state(path)
-                .await
-                .expect("should capture file state"),
+    async fn file_subscription(path: &Path) -> (FsWatchSubscription, mpsc::Receiver<()>) {
+        let (notification_tx, notification_rx) = mpsc::channel(1);
+        (
+            FsWatchSubscription {
+                path: path.to_path_buf(),
+                filter_path: Some(path.to_path_buf()),
+                last_observed_state: observe_path_state(path)
+                    .await
+                    .expect("should capture file state"),
+                pending_changed_paths: BTreeSet::new(),
+                notification_tx,
+            },
+            notification_rx,
+        )
+    }
+
+    fn expect_fs_changed_notification(
+        envelope: OutgoingEnvelope,
+    ) -> (ConnectionId, FsChangedNotification) {
+        match envelope {
+            OutgoingEnvelope::ToConnection {
+                connection_id,
+                message:
+                    OutgoingMessage::AppServerNotification(ServerNotification::FsChanged(notification)),
+            } => (connection_id, notification),
+            envelope => panic!("expected fs/changed notification, got {envelope:?}"),
         }
     }
 
@@ -490,20 +544,20 @@ mod tests {
                     connection_id: ConnectionId(1),
                     watch_id: "head".to_string(),
                 },
-                file_subscription(&head_path).await,
+                file_subscription(&head_path).await.0,
             ),
             (
                 WatchKey {
                     connection_id: ConnectionId(2),
                     watch_id: "fetch".to_string(),
                 },
-                file_subscription(&fetch_head_path).await,
+                file_subscription(&fetch_head_path).await.0,
             ),
         ]);
 
         std::fs::write(&head_path, "new-head\n").expect("update HEAD");
 
-        let notifications = notifications_for_event(
+        notifications_for_event(
             &mut subscriptions,
             watch_root,
             &Event::new(EventKind::Modify(notify::event::ModifyKind::Any))
@@ -512,14 +566,14 @@ mod tests {
         .await;
 
         assert_eq!(
-            notifications,
-            vec![(
-                ConnectionId(1),
-                FsChangedNotification {
+            subscriptions
+                .get(&WatchKey {
+                    connection_id: ConnectionId(1),
                     watch_id: "head".to_string(),
-                    changed_path: head_path,
-                },
-            )]
+                })
+                .expect("head subscription should exist")
+                .pending_changed_paths,
+            BTreeSet::from([head_path])
         );
     }
 
@@ -538,20 +592,20 @@ mod tests {
                     connection_id: ConnectionId(1),
                     watch_id: "head".to_string(),
                 },
-                file_subscription(&head_path).await,
+                file_subscription(&head_path).await.0,
             ),
             (
                 WatchKey {
                     connection_id: ConnectionId(2),
                     watch_id: "fetch".to_string(),
                 },
-                file_subscription(&fetch_head_path).await,
+                file_subscription(&fetch_head_path).await.0,
             ),
         ]);
 
         std::fs::write(&fetch_head_path, "new-fetch\n").expect("update FETCH_HEAD");
 
-        let notifications = notifications_for_event(
+        notifications_for_event(
             &mut subscriptions,
             watch_root,
             &Event::new(EventKind::Modify(notify::event::ModifyKind::Any)),
@@ -559,14 +613,167 @@ mod tests {
         .await;
 
         assert_eq!(
-            notifications,
-            vec![(
-                ConnectionId(2),
-                FsChangedNotification {
+            subscriptions
+                .get(&WatchKey {
+                    connection_id: ConnectionId(2),
                     watch_id: "fetch".to_string(),
-                    changed_path: fetch_head_path,
-                },
-            )]
+                })
+                .expect("fetch subscription should exist")
+                .pending_changed_paths,
+            BTreeSet::from([fetch_head_path])
+        );
+    }
+
+    #[tokio::test]
+    async fn blocked_sender_coalesces_same_path_notifications_per_watch_key() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let watch_root = temp_dir.path();
+        let head_path = watch_root.join("HEAD");
+        std::fs::write(&head_path, "old-head\n").expect("write HEAD");
+
+        let watch_key = WatchKey {
+            connection_id: ConnectionId(1),
+            watch_id: "head".to_string(),
+        };
+        let (subscription, notification_rx) = file_subscription(&head_path).await;
+        let subscriptions = Arc::new(AsyncMutex::new(HashMap::from([(
+            watch_key.clone(),
+            subscription,
+        )])));
+        let (tx, mut rx) = mpsc::channel(1);
+        let outgoing = Arc::new(OutgoingMessageSender::new(tx));
+        let manager = FsWatchManager::new(outgoing);
+        manager.spawn_notification_task(watch_key.clone(), subscriptions.clone(), notification_rx);
+
+        {
+            let mut subscriptions_guard = subscriptions.lock().await;
+            notifications_for_event(
+                &mut subscriptions_guard,
+                watch_root,
+                &Event::new(EventKind::Modify(notify::event::ModifyKind::Any))
+                    .add_path(head_path.clone()),
+            )
+            .await;
+        }
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let pending_is_empty = {
+                    let subscriptions_guard = subscriptions.lock().await;
+                    subscriptions_guard
+                        .get(&watch_key)
+                        .expect("head subscription should exist")
+                        .pending_changed_paths
+                        .is_empty()
+                };
+                if pending_is_empty {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("first batch should be drained into the sender");
+
+        {
+            let mut subscriptions_guard = subscriptions.lock().await;
+            notifications_for_event(
+                &mut subscriptions_guard,
+                watch_root,
+                &Event::new(EventKind::Modify(notify::event::ModifyKind::Any))
+                    .add_path(head_path.clone()),
+            )
+            .await;
+        }
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let pending_is_empty = {
+                    let subscriptions_guard = subscriptions.lock().await;
+                    subscriptions_guard
+                        .get(&watch_key)
+                        .expect("head subscription should exist")
+                        .pending_changed_paths
+                        .is_empty()
+                };
+                if pending_is_empty {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("second batch should be waiting on the blocked sender");
+
+        {
+            let mut subscriptions_guard = subscriptions.lock().await;
+            notifications_for_event(
+                &mut subscriptions_guard,
+                watch_root,
+                &Event::new(EventKind::Modify(notify::event::ModifyKind::Any))
+                    .add_path(head_path.clone()),
+            )
+            .await;
+        }
+        {
+            let mut subscriptions_guard = subscriptions.lock().await;
+            notifications_for_event(
+                &mut subscriptions_guard,
+                watch_root,
+                &Event::new(EventKind::Modify(notify::event::ModifyKind::Any))
+                    .add_path(head_path.clone()),
+            )
+            .await;
+        }
+
+        let (connection_id, notification) = expect_fs_changed_notification(
+            tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect("first notification should arrive")
+                .expect("channel should remain open"),
+        );
+        assert_eq!(connection_id, ConnectionId(1));
+        assert_eq!(
+            notification,
+            FsChangedNotification {
+                watch_id: "head".to_string(),
+                changed_path: head_path.clone(),
+            }
+        );
+
+        let (connection_id, notification) = expect_fs_changed_notification(
+            tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect("blocked notification should arrive")
+                .expect("channel should remain open"),
+        );
+        assert_eq!(connection_id, ConnectionId(1));
+        assert_eq!(
+            notification,
+            FsChangedNotification {
+                watch_id: "head".to_string(),
+                changed_path: head_path.clone(),
+            }
+        );
+
+        let (connection_id, notification) = expect_fs_changed_notification(
+            tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect("coalesced follow-up notification should arrive")
+                .expect("channel should remain open"),
+        );
+        assert_eq!(connection_id, ConnectionId(1));
+        assert_eq!(
+            notification,
+            FsChangedNotification {
+                watch_id: "head".to_string(),
+                changed_path: head_path,
+            }
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(150), rx.recv())
+                .await
+                .is_err()
         );
     }
 
