@@ -76,7 +76,14 @@ impl TurnContextDiffFragment for AgentsMdInstructions {
 impl ContextualUserFragmentDetector for AgentsMdInstructions {
     fn matches_contextual_user_text(text: &str) -> bool {
         let trimmed = text.trim_start();
-        trimmed.starts_with(AGENTS_MD_OPEN_TAG_PREFIX) && trimmed.trim_end().ends_with('>')
+        let Some(after_open_tag_prefix) = trimmed.strip_prefix(AGENTS_MD_OPEN_TAG_PREFIX) else {
+            return false;
+        };
+        let Some((directory, remaining)) = after_open_tag_prefix.split_once('>') else {
+            return false;
+        };
+        let expected_close_tag = format!("{AGENTS_MD_CLOSE_TAG_PREFIX}{directory}>");
+        remaining.trim_end().ends_with(&expected_close_tag)
     }
 }
 
@@ -177,6 +184,11 @@ mod tests {
         assert!(
             <AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
                 "<AGENTS.md INSTRUCTIONS FOR test_directory>\ntest_text\n</AGENTS.md INSTRUCTIONS FOR test_directory>"
+            )
+        );
+        assert!(
+            !<AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
+                "<AGENTS.md INSTRUCTIONS FOR test_directory>\ntest_text\n</AGENTS.md INSTRUCTIONS FOR other_directory>"
             )
         );
     }
