@@ -9,15 +9,20 @@ use serde::Serialize;
 
 use crate::codex::TurnContext;
 use crate::model_visible_context::ContextualUserContextRole;
+use crate::model_visible_context::ContextualUserFragmentDetector;
+use crate::model_visible_context::ContextualUserFragmentMarkers;
 use crate::model_visible_context::ModelVisibleContextFragment;
+use crate::model_visible_context::PLUGINS_CLOSE_TAG;
+use crate::model_visible_context::PLUGINS_OPEN_TAG;
+use crate::model_visible_context::SKILL_CLOSE_TAG;
+use crate::model_visible_context::SKILL_OPEN_TAG;
+use crate::model_visible_context::TaggedContextualUserFragment;
 use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
 use codex_protocol::protocol::TurnContextItem;
 
 use crate::model_visible_context::AGENTS_MD_CLOSE_TAG_PREFIX;
 use crate::model_visible_context::AGENTS_MD_OPEN_TAG_PREFIX;
-use crate::model_visible_context::PLUGINS_FRAGMENT_MARKERS;
-use crate::model_visible_context::SKILL_FRAGMENT_MARKERS;
 
 // ---------------------------------------------------------------------------
 // AGENTS instructions fragment
@@ -68,6 +73,12 @@ impl TurnContextDiffFragment for AgentsMdInstructions {
     }
 }
 
+impl ContextualUserFragmentDetector for AgentsMdInstructions {
+    fn matches_contextual_user_text(text: &str) -> bool {
+        crate::model_visible_context::is_agents_md_fragment(text)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Skills fragment
 // ---------------------------------------------------------------------------
@@ -84,11 +95,16 @@ impl ModelVisibleContextFragment for SkillInstructions {
     type Role = ContextualUserContextRole;
 
     fn render_text(&self) -> String {
-        SKILL_FRAGMENT_MARKERS.wrap_body(format!(
+        Self::wrap_contextual_user_body(format!(
             "<name>{}</name>\n<path>{}</path>\n{}",
             self.name, self.path, self.contents
         ))
     }
+}
+
+impl TaggedContextualUserFragment for SkillInstructions {
+    const MARKERS: ContextualUserFragmentMarkers =
+        ContextualUserFragmentMarkers::new(SKILL_OPEN_TAG, SKILL_CLOSE_TAG);
 }
 
 // ---------------------------------------------------------------------------
@@ -105,8 +121,13 @@ impl ModelVisibleContextFragment for PluginInstructions {
     type Role = ContextualUserContextRole;
 
     fn render_text(&self) -> String {
-        PLUGINS_FRAGMENT_MARKERS.wrap_body(self.text.clone())
+        Self::wrap_contextual_user_body(self.text.clone())
     }
+}
+
+impl TaggedContextualUserFragment for PluginInstructions {
+    const MARKERS: ContextualUserFragmentMarkers =
+        ContextualUserFragmentMarkers::new(PLUGINS_OPEN_TAG, PLUGINS_CLOSE_TAG);
 }
 
 // ---------------------------------------------------------------------------
@@ -181,10 +202,16 @@ mod tests {
 
     #[test]
     fn test_is_skill_instructions() {
-        assert!(SKILL_FRAGMENT_MARKERS.matches_text(
-            "<skill>\n<name>demo-skill</name>\n<path>skills/demo/SKILL.md</path>\nbody\n</skill>"
-        ));
-        assert!(!SKILL_FRAGMENT_MARKERS.matches_text("regular text"));
+        assert!(
+            <SkillInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
+                "<skill>\n<name>demo-skill</name>\n<path>skills/demo/SKILL.md</path>\nbody\n</skill>"
+            )
+        );
+        assert!(
+            !<SkillInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
+                "regular text"
+            )
+        );
     }
 
     #[test]

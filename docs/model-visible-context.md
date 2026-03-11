@@ -12,7 +12,7 @@ Envelope builders normalize text fragment boundaries by inserting `\n\n` between
 
 1. All model-visible injected context must be represented as a typed `ModelVisibleContextFragment`.
 2. Turn-state context assembly always produces exactly two envelopes: one developer message and one contextual-user message.
-3. Contextual-user fragments must use stable marker wrappers (or AGENTS.md-equivalent stable markers) so history parsing can distinguish contextual state from true user intent.
+3. Contextual-user fragments must have stable detection so history parsing can distinguish contextual state from true user intent.
 4. If a fragment is derived from durable/current turn state and should survive history-mutating flows (resume/fork/compaction/backtracking) via re-diffing, it must implement `TurnContextDiffFragment`.
 5. Do not hand-construct model-visible `ResponseItem::Message` payloads in new code. Use fragment conversion (`into_message` / `into_response_input_item`) and envelope builders.
 
@@ -25,14 +25,16 @@ When adding new model-visible context:
 1. Define a typed fragment type.
 2. Implement `ModelVisibleContextFragment` for it.
 3. Set the fragment `type Role` to the correct developer or contextual-user role.
-4. If it is a contextual-user fragment, wrap content with shared marker helpers/constants from `model_visible_context`.
+4. If it is a contextual-user fragment, implement contextual-user detection:
+   - prefer `TaggedContextualUserFragment` for marker-based detection/wrapping
+   - use `ContextualUserFragmentDetector` when matching is dynamic (for example AGENTS.md tags that embed directory names)
 5. If the fragment is derived from durable/current turn state and should be diffed/reinjected after history mutations, also implement `TurnContextDiffFragment`.
 6. Register the fragment type in the single ordered turn-state registry in `context_manager/updates.rs` (`REGISTERED_TURN_STATE_FRAGMENT_BUILDERS`) using `build_registered_turn_state_fragment::<YourType>`.
 7. Push the resulting fragments through the shared envelope builders.
 
 Do not hand-build developer or contextual-user model-visible `ResponseItem`s in new code.
 
-The role lives in the fragment's associated `type Role`. Marker/tag metadata for contextual-user fragments lives in the shared marker constants/helpers.
+The role lives in the fragment's associated `type Role`. Contextual-user detection is centralized in `model_visible_context` via `CONTEXTUAL_USER_FRAGMENT_DETECTORS`; add your fragment type there so history parsing and truncation see it.
 
 ## Choosing an envelope
 
@@ -58,7 +60,7 @@ Use the contextual-user envelope for contextual state or runtime markers that sh
 - user shell command records
 - turn-aborted markers
 
-Contextual-user fragments must have stable markers because history parsing uses those markers to distinguish contextual state from real user intent.
+Contextual-user fragments must have stable detection because history parsing uses it to distinguish contextual state from real user intent.
 
 Use `<environment_context>` only for environment facts derived from turn/session state (`TurnContext`) that may need turn-to-turn diffing. Today that includes `cwd`, `shell`, optional `current_date`, optional `timezone`, and optional network allow/deny domain summaries. Do not put developer policy/instructions or plugin/skill metadata into `<environment_context>`; those belong in their own typed fragments.
 

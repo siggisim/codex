@@ -5,13 +5,25 @@ use codex_protocol::models::ResponseItem;
 use crate::codex::TurnContext;
 use crate::exec::ExecToolCallOutput;
 use crate::model_visible_context::ContextualUserContextRole;
+use crate::model_visible_context::ContextualUserFragmentMarkers;
 use crate::model_visible_context::ModelVisibleContextFragment;
-use crate::model_visible_context::USER_SHELL_COMMAND_FRAGMENT_MARKERS;
+use crate::model_visible_context::TaggedContextualUserFragment;
+use crate::model_visible_context::USER_SHELL_COMMAND_CLOSE_TAG;
+use crate::model_visible_context::USER_SHELL_COMMAND_OPEN_TAG;
 use crate::tools::format_exec_output_str;
 
 fn format_duration_line(duration: Duration) -> String {
     let duration_seconds = duration.as_secs_f64();
     format!("Duration: {duration_seconds:.4} seconds")
+}
+
+pub(crate) struct UserShellCommandFragment;
+
+impl TaggedContextualUserFragment for UserShellCommandFragment {
+    const MARKERS: ContextualUserFragmentMarkers = ContextualUserFragmentMarkers::new(
+        USER_SHELL_COMMAND_OPEN_TAG,
+        USER_SHELL_COMMAND_CLOSE_TAG,
+    );
 }
 
 struct UserShellCommandRecord<'a> {
@@ -37,7 +49,7 @@ impl ModelVisibleContextFragment for UserShellCommandRecord<'_> {
             self.turn_context.truncation_policy,
         ));
         sections.push("</result>".to_string());
-        USER_SHELL_COMMAND_FRAGMENT_MARKERS.wrap_body(sections.join("\n"))
+        UserShellCommandFragment::wrap_contextual_user_body(sections.join("\n"))
     }
 }
 
@@ -79,10 +91,11 @@ mod tests {
     #[test]
     fn detects_user_shell_command_text_variants() {
         assert!(
-            USER_SHELL_COMMAND_FRAGMENT_MARKERS
-                .matches_text("<user_shell_command>\necho hi\n</user_shell_command>")
+            <UserShellCommandFragment as crate::model_visible_context::ContextualUserFragmentDetector>::matches_contextual_user_text("<user_shell_command>\necho hi\n</user_shell_command>")
         );
-        assert!(!USER_SHELL_COMMAND_FRAGMENT_MARKERS.matches_text("echo hi"));
+        assert!(
+            !<UserShellCommandFragment as crate::model_visible_context::ContextualUserFragmentDetector>::matches_contextual_user_text("echo hi")
+        );
     }
 
     #[tokio::test]

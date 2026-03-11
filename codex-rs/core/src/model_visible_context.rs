@@ -16,8 +16,6 @@ use codex_protocol::models::CustomDeveloperInstructions;
 use codex_protocol::models::MessageRole;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
-use codex_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 use codex_protocol::protocol::TurnContextItem;
 
 pub(crate) const AGENTS_MD_OPEN_TAG_PREFIX: &str = "<AGENTS.md INSTRUCTIONS FOR ";
@@ -55,6 +53,24 @@ impl ModelVisibleContextRole for ContextualUserContextRole {
 pub(crate) struct ContextualUserFragmentMarkers {
     start_marker: &'static str,
     end_marker: &'static str,
+}
+
+pub(crate) trait ContextualUserFragmentDetector {
+    fn matches_contextual_user_text(text: &str) -> bool;
+}
+
+pub(crate) trait TaggedContextualUserFragment {
+    const MARKERS: ContextualUserFragmentMarkers;
+
+    fn wrap_contextual_user_body(body: String) -> String {
+        Self::MARKERS.wrap_body(body)
+    }
+}
+
+impl<T: TaggedContextualUserFragment> ContextualUserFragmentDetector for T {
+    fn matches_contextual_user_text(text: &str) -> bool {
+        T::MARKERS.matches_text(text)
+    }
 }
 
 impl ContextualUserFragmentMarkers {
@@ -203,31 +219,20 @@ pub(crate) trait TurnContextDiffFragment: ModelVisibleContextFragment + Sized {
     ) -> Option<Self>;
 }
 
-/// Environment-context contextual-user fragment markers.
-pub(crate) const ENVIRONMENT_CONTEXT_FRAGMENT_MARKERS: ContextualUserFragmentMarkers =
-    ContextualUserFragmentMarkers::new(ENVIRONMENT_CONTEXT_OPEN_TAG, ENVIRONMENT_CONTEXT_CLOSE_TAG);
-/// Skill contextual-user fragment markers.
-pub(crate) const SKILL_FRAGMENT_MARKERS: ContextualUserFragmentMarkers =
-    ContextualUserFragmentMarkers::new(SKILL_OPEN_TAG, SKILL_CLOSE_TAG);
-/// User-shell-command contextual-user fragment markers.
-pub(crate) const USER_SHELL_COMMAND_FRAGMENT_MARKERS: ContextualUserFragmentMarkers =
-    ContextualUserFragmentMarkers::new(USER_SHELL_COMMAND_OPEN_TAG, USER_SHELL_COMMAND_CLOSE_TAG);
-/// Turn-aborted contextual-user fragment markers.
-pub(crate) const TURN_ABORTED_FRAGMENT_MARKERS: ContextualUserFragmentMarkers =
-    ContextualUserFragmentMarkers::new(TURN_ABORTED_OPEN_TAG, TURN_ABORTED_CLOSE_TAG);
-/// Plugin contextual-user fragment markers.
-pub(crate) const PLUGINS_FRAGMENT_MARKERS: ContextualUserFragmentMarkers =
-    ContextualUserFragmentMarkers::new(PLUGINS_OPEN_TAG, PLUGINS_CLOSE_TAG);
-
-const CONTEXTUAL_USER_FRAGMENT_MARKERS: &[ContextualUserFragmentMarkers] = &[
-    ENVIRONMENT_CONTEXT_FRAGMENT_MARKERS,
-    SKILL_FRAGMENT_MARKERS,
-    USER_SHELL_COMMAND_FRAGMENT_MARKERS,
-    TURN_ABORTED_FRAGMENT_MARKERS,
-    PLUGINS_FRAGMENT_MARKERS,
+/// Canonical contextual-user detection registry used by history parsing.
+///
+/// Add new contextual-user fragment types here so injected context is not
+/// mistaken for real user intent during event mapping and truncation.
+const CONTEXTUAL_USER_FRAGMENT_DETECTORS: &[fn(&str) -> bool] = &[
+    <crate::instructions::AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text,
+    <crate::environment_context::EnvironmentContext as ContextualUserFragmentDetector>::matches_contextual_user_text,
+    <crate::instructions::SkillInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text,
+    <crate::instructions::PluginInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text,
+    <crate::user_shell_command::UserShellCommandFragment as ContextualUserFragmentDetector>::matches_contextual_user_text,
+    <crate::tasks::TurnAbortedMarker as ContextualUserFragmentDetector>::matches_contextual_user_text,
 ];
 
-fn is_agents_md_fragment(text: &str) -> bool {
+pub(crate) fn is_agents_md_fragment(text: &str) -> bool {
     let trimmed = text.trim_start();
     let Some(after_open_tag_prefix) = trimmed.strip_prefix(AGENTS_MD_OPEN_TAG_PREFIX) else {
         return false;
@@ -246,10 +251,9 @@ pub(crate) fn is_contextual_user_fragment(content_item: &ContentItem) -> bool {
     let ContentItem::InputText { text } = content_item else {
         return false;
     };
-    is_agents_md_fragment(text)
-        || CONTEXTUAL_USER_FRAGMENT_MARKERS
-            .iter()
-            .any(|definition| definition.matches_text(text))
+    CONTEXTUAL_USER_FRAGMENT_DETECTORS
+        .iter()
+        .any(|detect| detect(text))
 }
 
 impl ModelVisibleContextFragment for CustomDeveloperInstructions {
@@ -304,6 +308,8 @@ mod tests {
 
     #[test]
     fn marker_matching_ignores_plain_text() {
-        assert!(!SKILL_FRAGMENT_MARKERS.matches_text("plain text"));
+        assert!(
+            !<crate::instructions::SkillInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text("plain text")
+        );
     }
 }

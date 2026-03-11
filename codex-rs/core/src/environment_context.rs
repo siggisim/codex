@@ -1,10 +1,13 @@
 use crate::codex::TurnContext;
 use crate::model_visible_context::ContextualUserContextRole;
-use crate::model_visible_context::ENVIRONMENT_CONTEXT_FRAGMENT_MARKERS;
+use crate::model_visible_context::ContextualUserFragmentMarkers;
 use crate::model_visible_context::ModelVisibleContextFragment;
+use crate::model_visible_context::TaggedContextualUserFragment;
 use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
 use crate::shell::Shell;
+use codex_protocol::protocol::ENVIRONMENT_CONTEXT_CLOSE_TAG;
+use codex_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 use codex_protocol::protocol::TurnContextItem;
 use codex_protocol::protocol::TurnContextNetworkItem;
 use serde::Deserialize;
@@ -28,6 +31,11 @@ pub(crate) struct NetworkContext {
 }
 
 impl EnvironmentContext {
+    const MARKERS: ContextualUserFragmentMarkers = ContextualUserFragmentMarkers::new(
+        ENVIRONMENT_CONTEXT_OPEN_TAG,
+        ENVIRONMENT_CONTEXT_CLOSE_TAG,
+    );
+
     pub fn new(
         cwd: Option<PathBuf>,
         shell: Shell,
@@ -122,8 +130,12 @@ impl ModelVisibleContextFragment for EnvironmentContext {
                 // lines.push("  <network enabled=\"false\" />".to_string());
             }
         }
-        ENVIRONMENT_CONTEXT_FRAGMENT_MARKERS.wrap_body(lines.join("\n"))
+        Self::MARKERS.wrap_body(lines.join("\n"))
     }
+}
+
+impl TaggedContextualUserFragment for EnvironmentContext {
+    const MARKERS: ContextualUserFragmentMarkers = Self::MARKERS;
 }
 
 impl TurnContextDiffFragment for EnvironmentContext {
