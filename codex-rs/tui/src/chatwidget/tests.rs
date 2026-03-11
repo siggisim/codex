@@ -9819,6 +9819,16 @@ async fn default_terminal_title_items_are_project_then_status() {
 }
 
 #[tokio::test]
+async fn terminal_title_can_render_app_name_item() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
+    chat.config.tui_terminal_title = Some(vec!["app-name".to_string()]);
+
+    chat.refresh_terminal_title();
+
+    assert_eq!(chat.last_terminal_title, Some("codex".to_string()));
+}
+
+#[tokio::test]
 async fn default_terminal_title_refreshes_when_status_changes() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(None).await;
     chat.config.animations = false;

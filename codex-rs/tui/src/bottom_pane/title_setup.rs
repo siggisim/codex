@@ -28,6 +28,8 @@ use crate::render::renderable::Renderable;
 #[derive(EnumIter, EnumString, Display, Debug, Clone, Copy, Eq, PartialEq, Hash)]
 #[strum(serialize_all = "kebab_case")]
 pub(crate) enum TerminalTitleItem {
+    /// Codex app name.
+    AppName,
     /// Project root name, or a compact cwd fallback.
     Project,
     /// Compact runtime status (Ready, spinner + Working/Thinking while active).
@@ -45,6 +47,7 @@ pub(crate) enum TerminalTitleItem {
 impl TerminalTitleItem {
     pub(crate) fn description(self) -> &'static str {
         match self {
+            TerminalTitleItem::AppName => "Codex app name",
             TerminalTitleItem::Project => "Project name (falls back to current directory name)",
             TerminalTitleItem::Status => {
                 "Compact session status (Ready, spinner + Working/Thinking while active)"
@@ -64,6 +67,7 @@ impl TerminalTitleItem {
     /// session.
     pub(crate) fn preview_example(self) -> &'static str {
         match self {
+            TerminalTitleItem::AppName => "codex",
             TerminalTitleItem::Project => "my-project",
             TerminalTitleItem::Status => "⠋ Working",
             TerminalTitleItem::Thread => "Investigate flaky test",

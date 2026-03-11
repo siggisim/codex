@@ -502,6 +502,7 @@ impl ChatWidget {
     /// the configured order while hiding values that are not yet available.
     fn terminal_title_value_for_item(&mut self, item: TerminalTitleItem) -> Option<String> {
         match item {
+            TerminalTitleItem::AppName => Some("codex".to_string()),
             TerminalTitleItem::Project => self.terminal_title_project_name(),
             TerminalTitleItem::Status => Some(self.terminal_title_status_text_at(Instant::now())),
             TerminalTitleItem::Thread => self.thread_name.as_ref().and_then(|name| {
