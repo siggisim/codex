@@ -11,38 +11,17 @@ use crate::model_visible_context::DeveloperContextRole;
 use crate::model_visible_context::ModelVisibleContextFragment;
 use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
-use codex_protocol::config_types::Personality;
 use codex_protocol::models::developer_collaboration_mode_text;
 use codex_protocol::models::developer_model_switch_text;
 use codex_protocol::models::developer_permissions_text;
 use codex_protocol::models::developer_personality_spec_text;
 use codex_protocol::models::developer_realtime_end_text;
 use codex_protocol::models::developer_realtime_start_text;
-use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::TurnContextItem;
 
 // ---------------------------------------------------------------------------
 // Model instructions fragment
 // ---------------------------------------------------------------------------
-
-fn model_instructions_update_text(
-    previous_model: Option<&str>,
-    turn_context: &TurnContext,
-) -> Option<String> {
-    let previous_model = previous_model?;
-    if previous_model == turn_context.model_info.slug.as_str() {
-        return None;
-    }
-
-    let model_instructions = turn_context
-        .model_info
-        .get_model_instructions(turn_context.personality);
-    if model_instructions.is_empty() {
-        return None;
-    }
-
-    Some(developer_model_switch_text(model_instructions))
-}
 
 pub(super) struct ModelInstructionsUpdateFragment {
     text: String,
@@ -65,7 +44,21 @@ impl TurnContextDiffFragment for ModelInstructionsUpdateFragment {
         let previous_model = params
             .previous_turn_settings
             .map(|settings| settings.model.as_str());
-        model_instructions_update_text(previous_model, turn_context).map(|text| Self { text })
+        let previous_model = previous_model?;
+        if previous_model == turn_context.model_info.slug.as_str() {
+            return None;
+        }
+
+        let model_instructions = turn_context
+            .model_info
+            .get_model_instructions(turn_context.personality);
+        if model_instructions.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            text: developer_model_switch_text(model_instructions),
+        })
     }
 }
 
@@ -187,21 +180,6 @@ impl TurnContextDiffFragment for CollaborationModeUpdateFragment {
 // Realtime fragment
 // ---------------------------------------------------------------------------
 
-fn realtime_update_text(
-    previous_realtime_active: Option<bool>,
-    current_realtime_active: bool,
-    previous_turn_realtime_active: Option<bool>,
-) -> Option<String> {
-    match (previous_realtime_active, current_realtime_active) {
-        (Some(true), false) => Some(developer_realtime_end_text("inactive")),
-        (Some(false), true) | (None, true) => Some(developer_realtime_start_text()),
-        (Some(true), true) | (Some(false), false) => None,
-        (None, false) => previous_turn_realtime_active
-            .filter(|realtime_active| *realtime_active)
-            .map(|_| developer_realtime_end_text("inactive")),
-    }
-}
-
 pub(super) struct RealtimeUpdateFragment {
     text: String,
 }
@@ -220,28 +198,27 @@ impl TurnContextDiffFragment for RealtimeUpdateFragment {
         reference_context_item: Option<&TurnContextItem>,
         params: &TurnContextDiffParams<'_>,
     ) -> Option<Self> {
-        realtime_update_text(
+        let text = match (
             reference_context_item.and_then(|previous| previous.realtime_active),
             turn_context.realtime_active,
-            params
+        ) {
+            (Some(true), false) => Some(developer_realtime_end_text("inactive")),
+            (Some(false), true) | (None, true) => Some(developer_realtime_start_text()),
+            (Some(true), true) | (Some(false), false) => None,
+            (None, false) => params
                 .previous_turn_settings
-                .and_then(|settings| settings.realtime_active),
-        )
-        .map(|text| Self { text })
+                .and_then(|settings| settings.realtime_active)
+                .filter(|realtime_active| *realtime_active)
+                .map(|_| developer_realtime_end_text("inactive")),
+        }?;
+
+        Some(Self { text })
     }
 }
 
 // ---------------------------------------------------------------------------
 // Personality fragment
 // ---------------------------------------------------------------------------
-
-fn personality_message_for(model_info: &ModelInfo, personality: Personality) -> Option<String> {
-    model_info
-        .model_messages
-        .as_ref()
-        .and_then(|spec| spec.get_personality_message(Some(personality)))
-        .filter(|message| !message.is_empty())
-}
 
 pub(super) struct PersonalityUpdateFragment {
     text: String,
@@ -277,8 +254,12 @@ impl TurnContextDiffFragment for PersonalityUpdateFragment {
             if has_baked_personality {
                 return None;
             }
-            let personality_message =
-                personality_message_for(&turn_context.model_info, personality)?;
+            let personality_message = turn_context
+                .model_info
+                .model_messages
+                .as_ref()
+                .and_then(|spec| spec.get_personality_message(Some(personality)))
+                .filter(|message| !message.is_empty())?;
             return Some(Self {
                 text: developer_personality_spec_text(personality_message),
             });
@@ -290,8 +271,12 @@ impl TurnContextDiffFragment for PersonalityUpdateFragment {
         if let Some(personality) = turn_context.personality
             && turn_context.personality != previous.personality
         {
-            let personality_message =
-                personality_message_for(&turn_context.model_info, personality)?;
+            let personality_message = turn_context
+                .model_info
+                .model_messages
+                .as_ref()
+                .and_then(|spec| spec.get_personality_message(Some(personality)))
+                .filter(|message| !message.is_empty())?;
             return Some(Self {
                 text: developer_personality_spec_text(personality_message),
             });
