@@ -39,6 +39,7 @@ use crate::config::Constrained;
 use crate::config::NetworkProxySpec;
 use crate::event_mapping::is_contextual_user_message_content;
 use crate::features::Feature;
+use crate::network_proxy_registry::NetworkProxyScope;
 use crate::protocol::Op;
 use crate::protocol::SandboxPolicy;
 use crate::truncate::approx_bytes_for_tokens;
@@ -550,7 +551,12 @@ async fn run_guardian_subagent(
     schema: Value,
     cancel_token: CancellationToken,
 ) -> anyhow::Result<GuardianAssessment> {
-    let live_network_config = match session.services.network_proxy.as_ref() {
+    let live_network_config = match session
+        .services
+        .network_proxies
+        .get(&NetworkProxyScope::SessionDefault)
+        .await
+    {
         Some(network_proxy) => Some(network_proxy.proxy().current_cfg().await?),
         None => None,
     };

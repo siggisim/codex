@@ -11,9 +11,11 @@ use crate::exec::ExecToolCallOutput;
 use crate::function_tool::FunctionCallError;
 use crate::mcp_connection_manager::ToolInfo;
 use crate::models_manager::model_info;
+use crate::network_proxy_registry::NetworkProxyRegistry;
 use crate::shell::default_user_shell;
 use crate::tools::format_exec_output_str;
 
+use codex_network_proxy::NetworkProxyAuditMetadata;
 use codex_protocol::ThreadId;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputPayload;
@@ -2233,7 +2235,14 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_manager,
         file_watcher,
         agent_control,
-        network_proxy: None,
+        network_proxies: NetworkProxyRegistry::new(
+            None,
+            false,
+            NetworkProxyAuditMetadata::default(),
+            None,
+        ),
+        network_policy_decider_session: None,
+        network_blocked_request_observer: None,
         network_approval: Arc::clone(&network_approval),
         state_db: None,
         model_client: ModelClient::new(
@@ -2794,7 +2803,14 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         mcp_manager,
         file_watcher,
         agent_control,
-        network_proxy: None,
+        network_proxies: NetworkProxyRegistry::new(
+            None,
+            false,
+            NetworkProxyAuditMetadata::default(),
+            None,
+        ),
+        network_policy_decider_session: None,
+        network_blocked_request_observer: None,
         network_approval: Arc::clone(&network_approval),
         state_db: None,
         model_client: ModelClient::new(

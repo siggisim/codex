@@ -4,6 +4,7 @@ use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian;
 use crate::network_policy_decision::denied_network_policy_message;
+use crate::network_proxy_registry::NetworkProxyScope;
 use crate::tools::sandboxing::ToolError;
 use codex_network_proxy::BlockedRequest;
 use codex_network_proxy::BlockedRequestObserver;
@@ -76,14 +77,20 @@ impl ActiveNetworkApproval {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct HostApprovalKey {
+    scope: NetworkProxyScope,
     host: String,
     protocol: &'static str,
     port: u16,
 }
 
 impl HostApprovalKey {
-    fn from_request(request: &NetworkPolicyRequest, protocol: NetworkApprovalProtocol) -> Self {
+    fn from_request(
+        request: &NetworkPolicyRequest,
+        protocol: NetworkApprovalProtocol,
+        scope: NetworkProxyScope,
+    ) -> Self {
         Self {
+            scope,
             host: request.host.to_ascii_lowercase(),
             protocol: protocol_key_label(protocol),
             port: request.port,
@@ -279,6 +286,7 @@ impl NetworkApprovalService {
         &self,
         session: Arc<Session>,
         request: NetworkPolicyRequest,
+        scope: NetworkProxyScope,
     ) -> NetworkDecision {
         const REASON_NOT_ALLOWED: &str = "not_allowed";
 
@@ -288,7 +296,7 @@ impl NetworkApprovalService {
             NetworkProtocol::Socks5Tcp => NetworkApprovalProtocol::Socks5Tcp,
             NetworkProtocol::Socks5Udp => NetworkApprovalProtocol::Socks5Udp,
         };
-        let key = HostApprovalKey::from_request(&request, protocol);
+        let key = HostApprovalKey::from_request(&request, protocol, scope.clone());
 
         {
             let denied_hosts = self.session_denied_hosts.lock().await;
@@ -387,6 +395,7 @@ impl NetworkApprovalService {
                         .persist_network_policy_amendment(
                             &network_policy_amendment,
                             &network_approval_context,
+                            &scope,
                         )
                         .await
                     {
@@ -417,6 +426,7 @@ impl NetworkApprovalService {
                         .persist_network_policy_amendment(
                             &network_policy_amendment,
                             &network_approval_context,
+                            &scope,
                         )
                         .await
                     {
@@ -506,16 +516,18 @@ pub(crate) fn build_blocked_request_observer(
 pub(crate) fn build_network_policy_decider(
     network_approval: Arc<NetworkApprovalService>,
     network_policy_decider_session: Arc<RwLock<std::sync::Weak<Session>>>,
+    scope: NetworkProxyScope,
 ) -> Arc<dyn NetworkPolicyDecider> {
     Arc::new(move |request: NetworkPolicyRequest| {
         let network_approval = Arc::clone(&network_approval);
         let network_policy_decider_session = Arc::clone(&network_policy_decider_session);
+        let scope = scope.clone();
         async move {
             let Some(session) = network_policy_decider_session.read().await.upgrade() else {
                 return NetworkDecision::ask("not_allowed");
             };
             network_approval
-                .handle_inline_policy_request(session, request)
+                .handle_inline_policy_request(session, request, scope)
                 .await
         }
     })
@@ -592,14 +604,22 @@ pub(crate) async fn finish_deferred_network_approval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::network_proxy_registry::NetworkProxyScope;
     use codex_network_proxy::BlockedRequestArgs;
     use codex_protocol::protocol::AskForApproval;
     use pretty_assertions::assert_eq;
+
+    fn scope(name: &str) -> NetworkProxyScope {
+        NetworkProxyScope::Skill {
+            path_to_skills_md: format!("/tmp/{name}/SKILL.md").into(),
+        }
+    }
 
     #[tokio::test]
     async fn pending_approvals_are_deduped_per_host_protocol_and_port() {
         let service = NetworkApprovalService::default();
         let key = HostApprovalKey {
+            scope: scope("alpha"),
             host: "example.com".to_string(),
             protocol: "http",
             port: 443,
@@ -617,14 +637,40 @@ mod tests {
     async fn pending_approvals_do_not_dedupe_across_ports() {
         let service = NetworkApprovalService::default();
         let first_key = HostApprovalKey {
+            scope: scope("alpha"),
             host: "example.com".to_string(),
             protocol: "https",
             port: 443,
         };
         let second_key = HostApprovalKey {
+            scope: scope("alpha"),
             host: "example.com".to_string(),
             protocol: "https",
             port: 8443,
+        };
+
+        let (first, first_is_owner) = service.get_or_create_pending_approval(first_key).await;
+        let (second, second_is_owner) = service.get_or_create_pending_approval(second_key).await;
+
+        assert!(first_is_owner);
+        assert!(second_is_owner);
+        assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[tokio::test]
+    async fn pending_approvals_do_not_dedupe_across_proxy_scopes() {
+        let service = NetworkApprovalService::default();
+        let first_key = HostApprovalKey {
+            scope: scope("alpha"),
+            host: "example.com".to_string(),
+            protocol: "https",
+            port: 443,
+        };
+        let second_key = HostApprovalKey {
+            scope: scope("beta"),
+            host: "example.com".to_string(),
+            protocol: "https",
+            port: 443,
         };
 
         let (first, first_is_owner) = service.get_or_create_pending_approval(first_key).await;
@@ -642,16 +688,19 @@ mod tests {
             let mut approved_hosts = source.session_approved_hosts.lock().await;
             approved_hosts.extend([
                 HostApprovalKey {
+                    scope: scope("alpha"),
                     host: "example.com".to_string(),
                     protocol: "https",
                     port: 443,
                 },
                 HostApprovalKey {
+                    scope: scope("alpha"),
                     host: "example.com".to_string(),
                     protocol: "https",
                     port: 8443,
                 },
                 HostApprovalKey {
+                    scope: scope("alpha"),
                     host: "example.com".to_string(),
                     protocol: "http",
                     port: 80,
@@ -669,22 +718,27 @@ mod tests {
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        copied.sort_by(|a, b| (&a.host, a.protocol, a.port).cmp(&(&b.host, b.protocol, b.port)));
+        copied.sort_by(|a, b| {
+            (&a.host, a.protocol, a.port, &a.scope).cmp(&(&b.host, b.protocol, b.port, &b.scope))
+        });
 
         assert_eq!(
             copied,
             vec![
                 HostApprovalKey {
+                    scope: scope("alpha"),
                     host: "example.com".to_string(),
                     protocol: "http",
                     port: 80,
                 },
                 HostApprovalKey {
+                    scope: scope("alpha"),
                     host: "example.com".to_string(),
                     protocol: "https",
                     port: 443,
                 },
                 HostApprovalKey {
+                    scope: scope("alpha"),
                     host: "example.com".to_string(),
                     protocol: "https",
                     port: 8443,

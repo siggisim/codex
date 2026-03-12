@@ -9,6 +9,7 @@ use crate::features::Feature;
 use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian;
+use crate::network_proxy_registry::NetworkProxyScope;
 use crate::sandboxing::ExecRequest;
 use crate::sandboxing::SandboxPermissions;
 use crate::shell::ShellType;
@@ -50,6 +51,7 @@ use codex_shell_escalation::ShellCommandExecutor;
 use codex_shell_escalation::Stopwatch;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -126,6 +128,7 @@ pub(super) async fn try_run_zsh_fork(
         ctx.session.services.exec_policy.current().as_ref().clone(),
     ));
     let command_executor = CoreShellCommandExecutor {
+        session: Some(Arc::clone(&ctx.session)),
         command,
         cwd: sandbox_cwd,
         sandbox_policy,
@@ -238,6 +241,7 @@ pub(crate) async fn prepare_unified_exec_zsh_fork(
         ctx.session.services.exec_policy.current().as_ref().clone(),
     ));
     let command_executor = CoreShellCommandExecutor {
+        session: Some(Arc::clone(&ctx.session)),
         command: exec_request.command.clone(),
         cwd: exec_request.cwd.clone(),
         sandbox_policy: exec_request.sandbox_policy.clone(),
@@ -477,26 +481,7 @@ impl CoreShellActionProvider {
     /// an absolute path. The idea is that we check to see whether it matches
     /// any skills.
     async fn find_skill(&self, program: &AbsolutePathBuf) -> Option<SkillMetadata> {
-        let force_reload = false;
-        let skills_outcome = self
-            .session
-            .services
-            .skills_manager
-            .skills_for_cwd(&self.turn.cwd, force_reload)
-            .await;
-
-        let program_path = program.as_path();
-        for skill in skills_outcome.skills {
-            // We intentionally ignore "enabled" status here for now.
-            let Some(skill_root) = skill.path_to_skills_md.parent() else {
-                continue;
-            };
-            if program_path.starts_with(skill_root.join("scripts")) {
-                return Some(skill);
-            }
-        }
-
-        None
+        find_skill_for_program(self.session.as_ref(), self.turn.cwd.as_path(), program).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -603,6 +588,32 @@ impl CoreShellActionProvider {
         );
         Ok(action)
     }
+}
+
+async fn find_skill_for_program(
+    session: &crate::codex::Session,
+    cwd: &Path,
+    program: &AbsolutePathBuf,
+) -> Option<SkillMetadata> {
+    let force_reload = false;
+    let skills_outcome = session
+        .services
+        .skills_manager
+        .skills_for_cwd(cwd, force_reload)
+        .await;
+
+    let program_path = program.as_path();
+    for skill in skills_outcome.skills {
+        // We intentionally ignore "enabled" status here for now.
+        let Some(skill_root) = skill.path_to_skills_md.parent() else {
+            continue;
+        };
+        if program_path.starts_with(skill_root.join("scripts")) {
+            return Some(skill);
+        }
+    }
+
+    None
 }
 
 // Shell-wrapper parsing is weaker than direct exec interception because it can
@@ -821,6 +832,7 @@ fn commands_for_intercepted_exec_policy(
 }
 
 struct CoreShellCommandExecutor {
+    session: Option<Arc<crate::codex::Session>>,
     command: Vec<String>,
     cwd: PathBuf,
     sandbox_policy: SandboxPolicy,
@@ -844,6 +856,7 @@ struct PrepareSandboxedExecParams<'a> {
     command: Vec<String>,
     workdir: &'a AbsolutePathBuf,
     env: HashMap<String, String>,
+    network: Option<codex_network_proxy::NetworkProxy>,
     sandbox_policy: &'a SandboxPolicy,
     file_system_sandbox_policy: &'a FileSystemSandboxPolicy,
     network_sandbox_policy: NetworkSandboxPolicy,
@@ -925,10 +938,12 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
                 arg0: Some(first_arg.clone()),
             },
             EscalationExecution::TurnDefault => {
+                let network = self.network_for_program(program).await?;
                 self.prepare_sandboxed_exec(PrepareSandboxedExecParams {
                     command,
                     workdir,
                     env,
+                    network,
                     sandbox_policy: &self.sandbox_policy,
                     file_system_sandbox_policy: &self.file_system_sandbox_policy,
                     network_sandbox_policy: self.network_sandbox_policy,
@@ -942,12 +957,14 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
             EscalationExecution::Permissions(EscalationPermissions::PermissionProfile(
                 permission_profile,
             )) => {
+                let network = self.network_for_program(program).await?;
                 // Merge additive permissions into the existing turn/request sandbox policy.
                 // On macOS, additional profile extensions are unioned with the turn defaults.
                 self.prepare_sandboxed_exec(PrepareSandboxedExecParams {
                     command,
                     workdir,
                     env,
+                    network,
                     sandbox_policy: &self.sandbox_policy,
                     file_system_sandbox_policy: &self.file_system_sandbox_policy,
                     network_sandbox_policy: self.network_sandbox_policy,
@@ -959,11 +976,13 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
                 })?
             }
             EscalationExecution::Permissions(EscalationPermissions::Permissions(permissions)) => {
+                let network = self.network_for_program(program).await?;
                 // Use a fully specified sandbox policy instead of merging into the turn policy.
                 self.prepare_sandboxed_exec(PrepareSandboxedExecParams {
                     command,
                     workdir,
                     env,
+                    network,
                     sandbox_policy: &permissions.sandbox_policy,
                     file_system_sandbox_policy: &permissions.file_system_sandbox_policy,
                     network_sandbox_policy: permissions.network_sandbox_policy,
@@ -981,6 +1000,29 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
 }
 
 impl CoreShellCommandExecutor {
+    async fn network_for_program(
+        &self,
+        program: &AbsolutePathBuf,
+    ) -> anyhow::Result<Option<codex_network_proxy::NetworkProxy>> {
+        let Some(session) = self.session.as_ref() else {
+            return Ok(self.network.clone());
+        };
+        let Some(skill) =
+            find_skill_for_program(session.as_ref(), &self.sandbox_policy_cwd, program).await
+        else {
+            return Ok(self.network.clone());
+        };
+
+        session
+            .get_or_start_network_proxy(
+                NetworkProxyScope::Skill {
+                    path_to_skills_md: skill.path_to_skills_md,
+                },
+                &self.sandbox_policy,
+            )
+            .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn prepare_sandboxed_exec(
         &self,
@@ -990,6 +1032,7 @@ impl CoreShellCommandExecutor {
             command,
             workdir,
             env,
+            network,
             sandbox_policy,
             file_system_sandbox_policy,
             network_sandbox_policy,
@@ -1006,7 +1049,7 @@ impl CoreShellCommandExecutor {
             network_sandbox_policy,
             SandboxablePreference::Auto,
             self.windows_sandbox_level,
-            self.network.is_some(),
+            network.is_some(),
         );
         let mut exec_request =
             sandbox_manager.transform(crate::sandboxing::SandboxTransformRequest {
@@ -1028,8 +1071,8 @@ impl CoreShellCommandExecutor {
                 file_system_policy: file_system_sandbox_policy,
                 network_policy: network_sandbox_policy,
                 sandbox,
-                enforce_managed_network: self.network.is_some(),
-                network: self.network.as_ref(),
+                enforce_managed_network: network.is_some(),
+                network: network.as_ref(),
                 sandbox_policy_cwd: &self.sandbox_policy_cwd,
                 #[cfg(target_os = "macos")]
                 macos_seatbelt_profile_extensions,

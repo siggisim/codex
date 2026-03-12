@@ -169,6 +169,8 @@ use crate::error::CodexErr;
 use crate::error::Result as CodexResult;
 #[cfg(test)]
 use crate::exec::StreamOutput;
+use crate::network_proxy_registry::NetworkProxyRegistry;
+use crate::network_proxy_registry::NetworkProxyScope;
 use codex_config::CONFIG_TOML_FILE;
 
 mod rollout_reconstruction;
@@ -1093,6 +1095,52 @@ impl Session {
         Ok((network_proxy, session_network_proxy))
     }
 
+    pub(crate) async fn get_or_start_network_proxy(
+        self: &Arc<Self>,
+        scope: NetworkProxyScope,
+        sandbox_policy: &SandboxPolicy,
+    ) -> anyhow::Result<Option<NetworkProxy>> {
+        let session = Arc::clone(self);
+        let started = self
+            .services
+            .network_proxies
+            .get_or_start(
+                scope.clone(),
+                move |spec, managed_enabled, audit_metadata| {
+                    let session = Arc::clone(&session);
+                    let scope = scope.clone();
+                    let sandbox_policy = sandbox_policy.clone();
+                    async move {
+                        let network_policy_decider = session
+                            .services
+                            .network_policy_decider_session
+                            .as_ref()
+                            .map(|network_policy_decider_session| {
+                                build_network_policy_decider(
+                                    Arc::clone(&session.services.network_approval),
+                                    Arc::clone(network_policy_decider_session),
+                                    scope,
+                                )
+                            });
+                        spec.start_proxy(
+                            &sandbox_policy,
+                            network_policy_decider,
+                            session
+                                .services
+                                .network_blocked_request_observer
+                                .as_ref()
+                                .map(Arc::clone),
+                            managed_enabled,
+                            audit_metadata,
+                        )
+                        .await
+                    }
+                },
+            )
+            .await?;
+        Ok(started.map(|started| started.proxy()))
+    }
+
     /// Don't expand the number of mutated arguments on config. We are in the process of getting rid of it.
     pub(crate) fn build_per_turn_config(session_configuration: &SessionConfiguration) -> Config {
         // todo(aibrahim): store this state somewhere else so we don't need to mut config
@@ -1563,9 +1611,10 @@ impl Session {
                     build_network_policy_decider(
                         Arc::clone(&network_approval),
                         Arc::clone(network_policy_decider_session),
+                        NetworkProxyScope::SessionDefault,
                     )
                 });
-        let (network_proxy, session_network_proxy) =
+        let (default_network_proxy, session_network_proxy) =
             if let Some(spec) = config.permissions.network.as_ref() {
                 let (network_proxy, session_network_proxy) = Self::start_managed_network_proxy(
                     spec,
@@ -1573,13 +1622,19 @@ impl Session {
                     network_policy_decider.as_ref().map(Arc::clone),
                     blocked_request_observer.as_ref().map(Arc::clone),
                     managed_network_requirements_enabled,
-                    network_proxy_audit_metadata,
+                    network_proxy_audit_metadata.clone(),
                 )
                 .await?;
                 (Some(network_proxy), Some(session_network_proxy))
             } else {
                 (None, None)
             };
+        let network_proxies = NetworkProxyRegistry::new(
+            config.permissions.network.clone(),
+            managed_network_requirements_enabled,
+            network_proxy_audit_metadata.clone(),
+            default_network_proxy,
+        );
 
         let mut hook_shell_argv = default_shell.derive_exec_args("", false);
         let hook_shell_program = hook_shell_argv.remove(0);
@@ -1637,7 +1692,9 @@ impl Session {
             mcp_manager: Arc::clone(&mcp_manager),
             file_watcher,
             agent_control,
-            network_proxy,
+            network_proxies,
+            network_policy_decider_session,
+            network_blocked_request_observer: blocked_request_observer,
             network_approval: Arc::clone(&network_approval),
             state_db: state_db_ctx.clone(),
             model_client: ModelClient::new(
@@ -1674,7 +1731,9 @@ impl Session {
             js_repl,
             next_internal_sub_id: AtomicU64::new(0),
         });
-        if let Some(network_policy_decider_session) = network_policy_decider_session {
+        if let Some(network_policy_decider_session) =
+            sess.services.network_policy_decider_session.as_ref()
+        {
             let mut guard = network_policy_decider_session.write().await;
             *guard = Arc::downgrade(&sess);
         }
@@ -2306,8 +2365,10 @@ impl Session {
             model_info,
             &self.services.models_manager,
             self.services
-                .network_proxy
-                .as_ref()
+                .network_proxies
+                .get(&NetworkProxyScope::SessionDefault)
+                .await
+                .as_deref()
                 .map(StartedNetworkProxy::proxy),
             sub_id,
             Arc::clone(&self.js_repl),
@@ -2679,6 +2740,7 @@ impl Session {
         &self,
         amendment: &NetworkPolicyAmendment,
         network_approval_context: &NetworkApprovalContext,
+        scope: &NetworkProxyScope,
     ) -> anyhow::Result<()> {
         let host =
             Self::validated_network_policy_amendment_host(amendment, network_approval_context)?;
@@ -2692,7 +2754,7 @@ impl Session {
         let execpolicy_amendment =
             execpolicy_network_rule_amendment(amendment, network_approval_context, &host);
 
-        if let Some(started_network_proxy) = self.services.network_proxy.as_ref() {
+        if let Some(started_network_proxy) = self.services.network_proxies.get(scope).await {
             let proxy = started_network_proxy.proxy();
             match amendment.action {
                 NetworkPolicyRuleAction::Allow => proxy

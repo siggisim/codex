@@ -6,12 +6,13 @@ use crate::RolloutRecorder;
 use crate::agent::AgentControl;
 use crate::analytics_client::AnalyticsEventsClient;
 use crate::client::ModelClient;
-use crate::config::StartedNetworkProxy;
+use crate::codex::Session;
 use crate::exec_policy::ExecPolicyManager;
 use crate::file_watcher::FileWatcher;
 use crate::mcp::McpManager;
 use crate::mcp_connection_manager::McpConnectionManager;
 use crate::models_manager::manager::ModelsManager;
+use crate::network_proxy_registry::NetworkProxyRegistry;
 use crate::plugins::PluginsManager;
 use crate::skills::SkillsManager;
 use crate::state_db::StateDbHandle;
@@ -20,10 +21,12 @@ use crate::tools::runtimes::ExecveSessionApproval;
 use crate::tools::sandboxing::ApprovalStore;
 use crate::unified_exec::UnifiedExecProcessManager;
 use codex_hooks::Hooks;
+use codex_network_proxy::BlockedRequestObserver;
 use codex_otel::SessionTelemetry;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value as JsonValue;
 use std::path::PathBuf;
+use std::sync::Weak;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tokio::sync::watch;
@@ -77,7 +80,9 @@ pub(crate) struct SessionServices {
     pub(crate) mcp_manager: Arc<McpManager>,
     pub(crate) file_watcher: Arc<FileWatcher>,
     pub(crate) agent_control: AgentControl,
-    pub(crate) network_proxy: Option<StartedNetworkProxy>,
+    pub(crate) network_proxies: NetworkProxyRegistry,
+    pub(crate) network_policy_decider_session: Option<Arc<RwLock<Weak<Session>>>>,
+    pub(crate) network_blocked_request_observer: Option<Arc<dyn BlockedRequestObserver>>,
     pub(crate) network_approval: Arc<NetworkApprovalService>,
     pub(crate) state_db: Option<StateDbHandle>,
     /// Session-scoped model client shared across turns.
