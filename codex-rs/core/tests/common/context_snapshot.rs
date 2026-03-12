@@ -241,9 +241,7 @@ fn canonicalize_snapshot_text(text: &str) -> String {
     if text.starts_with("<permissions instructions>") {
         return "<PERMISSIONS_INSTRUCTIONS>".to_string();
     }
-    if text.starts_with("<AGENTS.md INSTRUCTIONS FOR ")
-        || text.starts_with("# AGENTS.md instructions for ")
-    {
+    if text.starts_with("# AGENTS.md instructions for ") {
         return "<AGENTS_MD>".to_string();
     }
     if text.starts_with("<environment_context>") {

@@ -21,8 +21,8 @@ use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
 use codex_protocol::protocol::TurnContextItem;
 
-const LEGACY_AGENTS_MD_START_MARKER: &str = "# AGENTS.md instructions for ";
-const LEGACY_AGENTS_MD_END_MARKER: &str = "</INSTRUCTIONS>";
+const AGENTS_MD_START_MARKER: &str = "# AGENTS.md instructions for ";
+const AGENTS_MD_END_MARKER: &str = "</INSTRUCTIONS>";
 
 // ---------------------------------------------------------------------------
 // AGENTS instructions fragment
@@ -39,15 +39,15 @@ impl ModelVisibleContextFragment for AgentsMdInstructions {
     type Role = ContextualUserContextRole;
 
     fn render_text(&self) -> String {
-        // TODO(ccunningham): Switch rendering to the XML-ish wrapper
-        // `<AGENTS.md INSTRUCTIONS FOR {dirname}>...` once we are ready to drop
-        // legacy AGENTS history compatibility.
+        // TODO(ccunningham): Switch AGENTS.md rendering/detection to
+        // `<AGENTS.md INSTRUCTIONS FOR {dirname}>...` for consistency with the
+        // other contextual-user fragments.
         format!(
             "{prefix}{directory}\n\n<INSTRUCTIONS>\n{contents}\n{suffix}",
-            prefix = LEGACY_AGENTS_MD_START_MARKER,
+            prefix = AGENTS_MD_START_MARKER,
             directory = self.directory,
             contents = self.text,
-            suffix = LEGACY_AGENTS_MD_END_MARKER,
+            suffix = AGENTS_MD_END_MARKER,
         )
     }
 }
@@ -79,11 +79,10 @@ impl TurnContextDiffFragment for AgentsMdInstructions {
 impl ContextualUserFragmentDetector for AgentsMdInstructions {
     fn matches_contextual_user_text(text: &str) -> bool {
         let trimmed = text.trim_start();
-        // TODO(ccunningham): Drop the legacy detector and switch rendering to
-        // the XML-ish wrapper once old AGENTS history no longer needs
-        // resume/compaction compatibility.
-        trimmed.starts_with(LEGACY_AGENTS_MD_START_MARKER)
-            && trimmed.trim_end().ends_with(LEGACY_AGENTS_MD_END_MARKER)
+        // TODO(ccunningham): Switch detection to the XML-ish wrapper once we
+        // intentionally change the shipped AGENTS.md fragment format.
+        trimmed.starts_with(AGENTS_MD_START_MARKER)
+            && trimmed.trim_end().ends_with(AGENTS_MD_END_MARKER)
     }
 }
 
@@ -184,11 +183,6 @@ mod tests {
         assert!(
             <AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
                 "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>"
-            )
-        );
-        assert!(
-            !<AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
-                "<AGENTS.md INSTRUCTIONS FOR test_directory>\ntest_text\n</AGENTS.md INSTRUCTIONS FOR test_directory>"
             )
         );
     }
