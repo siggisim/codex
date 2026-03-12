@@ -536,7 +536,7 @@ pub struct RejectConfig {
     /// Reject approval prompts triggered by skill script execution.
     #[serde(default)]
     pub skill_approval: bool,
-    /// Reject approval prompts related to built-in permission requests.
+    /// Reject approval prompts related to inline `with_additional_permissions` requests.
     #[serde(default)]
     pub request_permissions: bool,
     /// Reject MCP elicitation prompts.

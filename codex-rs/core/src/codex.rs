@@ -2908,14 +2908,6 @@ impl Session {
                     scope: PermissionGrantScope::Turn,
                 });
             }
-            AskForApproval::Reject(reject_config)
-                if reject_config.rejects_request_permissions() =>
-            {
-                return Some(RequestPermissionsResponse {
-                    permissions: PermissionProfile::default(),
-                    scope: PermissionGrantScope::Turn,
-                });
-            }
             AskForApproval::OnFailure
             | AskForApproval::OnRequest
             | AskForApproval::UnlessTrusted

@@ -2306,7 +2306,7 @@ async fn request_permissions_emits_event_when_reject_policy_allows_requests() {
 }
 
 #[tokio::test]
-async fn request_permissions_returns_empty_grant_when_reject_policy_blocks_requests() {
+async fn request_permissions_emits_event_when_reject_policy_blocks_inline_requests() {
     let (session, mut turn_context, rx) = make_session_and_context_with_rx().await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
     Arc::get_mut(&mut turn_context)
@@ -2323,37 +2323,61 @@ async fn request_permissions_returns_empty_grant_when_reject_policy_blocks_reque
         ))
         .expect("test setup should allow updating approval policy");
 
-    let response = session
-        .request_permissions(
-            &turn_context,
-            "call-1".to_string(),
-            codex_protocol::request_permissions::RequestPermissionsArgs {
-                reason: Some("need network".to_string()),
-                permissions: codex_protocol::models::PermissionProfile {
-                    network: Some(codex_protocol::models::NetworkPermissions {
-                        enabled: Some(true),
-                    }),
-                    ..Default::default()
-                },
-            },
-        )
+    let session = Arc::new(session);
+    let turn_context = Arc::new(turn_context);
+    let call_id = "call-1".to_string();
+    let expected_response = codex_protocol::request_permissions::RequestPermissionsResponse {
+        permissions: codex_protocol::models::PermissionProfile {
+            network: Some(codex_protocol::models::NetworkPermissions {
+                enabled: Some(true),
+            }),
+            ..Default::default()
+        },
+        scope: PermissionGrantScope::Turn,
+    };
+
+    let handle = tokio::spawn({
+        let session = Arc::clone(&session);
+        let turn_context = Arc::clone(&turn_context);
+        let call_id = call_id.clone();
+        async move {
+            session
+                .request_permissions(
+                    turn_context.as_ref(),
+                    call_id,
+                    codex_protocol::request_permissions::RequestPermissionsArgs {
+                        reason: Some("need network".to_string()),
+                        permissions: codex_protocol::models::PermissionProfile {
+                            network: Some(codex_protocol::models::NetworkPermissions {
+                                enabled: Some(true),
+                            }),
+                            ..Default::default()
+                        },
+                    },
+                )
+                .await
+        }
+    });
+
+    let request_event = tokio::time::timeout(StdDuration::from_secs(1), rx.recv())
+        .await
+        .expect("request_permissions event timed out")
+        .expect("request_permissions event missing");
+    let EventMsg::RequestPermissions(request) = request_event.msg else {
+        panic!("expected request_permissions event");
+    };
+    assert_eq!(request.call_id, call_id);
+
+    session
+        .notify_request_permissions_response(&request.call_id, expected_response.clone())
         .await;
 
-    assert_eq!(
-        response,
-        Some(
-            codex_protocol::request_permissions::RequestPermissionsResponse {
-                permissions: codex_protocol::models::PermissionProfile::default(),
-                scope: PermissionGrantScope::Turn,
-            }
-        )
-    );
-    assert!(
-        tokio::time::timeout(StdDuration::from_millis(50), rx.recv())
-            .await
-            .is_err(),
-        "unexpected request_permissions event emitted",
-    );
+    let response = tokio::time::timeout(StdDuration::from_secs(1), handle)
+        .await
+        .expect("request_permissions future timed out")
+        .expect("request_permissions join error");
+
+    assert_eq!(response, Some(expected_response));
 }
 
 #[tokio::test]

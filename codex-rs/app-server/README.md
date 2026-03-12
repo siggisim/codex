@@ -928,7 +928,7 @@ Only the granted subset matters on the wire. Any permissions omitted from `resul
 
 Within the same turn, granted permissions are sticky: later shell-like tool calls can automatically reuse the granted subset without reissuing a separate permission request.
 
-If the session approval policy uses `Reject` with `request_permissions: true`, the server does not send `item/permissions/requestApproval` to the client. Instead, the tool is auto-denied and resolves with an empty granted-permissions payload.
+If the session approval policy uses `Reject` with `request_permissions: true`, inline `with_additional_permissions` command requests are auto-denied. The standalone `request_permissions` tool still sends `item/permissions/requestApproval`, and any granted permissions remain sticky for later shell-like calls in the same turn.
 
 ### Dynamic tool calls (experimental)
 

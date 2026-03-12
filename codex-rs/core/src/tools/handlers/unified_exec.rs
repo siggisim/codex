@@ -177,6 +177,9 @@ impl ToolHandler for UnifiedExecHandler {
                     additional_permissions,
                 )
                 .await;
+                let additional_permissions_allowed = request_permission_enabled
+                    || (session.features().enabled(Feature::RequestPermissionsTool)
+                        && effective_additional_permissions.permissions_preapproved);
 
                 // Sticky turn permissions have already been approved, so they should
                 // continue through the normal exec approval flow for the command.
@@ -202,7 +205,7 @@ impl ToolHandler for UnifiedExecHandler {
                 let cwd = workdir.clone().unwrap_or(cwd);
                 let normalized_additional_permissions =
                     match normalize_and_validate_additional_permissions(
-                        request_permission_enabled,
+                        additional_permissions_allowed,
                         context.turn.approval_policy.value(),
                         effective_additional_permissions.sandbox_permissions,
                         effective_additional_permissions.additional_permissions,

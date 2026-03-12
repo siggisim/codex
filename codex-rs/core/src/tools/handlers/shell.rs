@@ -342,8 +342,11 @@ impl ShellHandler {
             additional_permissions,
         )
         .await;
+        let additional_permissions_allowed = request_permission_enabled
+            || (session.features().enabled(Feature::RequestPermissionsTool)
+                && effective_additional_permissions.permissions_preapproved);
         let normalized_additional_permissions = normalize_and_validate_additional_permissions(
-            request_permission_enabled,
+            additional_permissions_allowed,
             turn.approval_policy.value(),
             effective_additional_permissions.sandbox_permissions,
             effective_additional_permissions.additional_permissions,

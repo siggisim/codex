@@ -102,7 +102,7 @@ fn resolve_workdir_base_path(
 /// Validates feature/policy constraints for `with_additional_permissions` and
 /// normalizes any path-based permissions. Errors if the request is invalid.
 pub(crate) fn normalize_and_validate_additional_permissions(
-    request_permission_enabled: bool,
+    additional_permissions_allowed: bool,
     approval_policy: AskForApproval,
     sandbox_permissions: SandboxPermissions,
     additional_permissions: Option<PermissionProfile>,
@@ -114,11 +114,11 @@ pub(crate) fn normalize_and_validate_additional_permissions(
         SandboxPermissions::WithAdditionalPermissions
     );
 
-    if !request_permission_enabled
+    if !additional_permissions_allowed
         && (uses_additional_permissions || additional_permissions.is_some())
     {
         return Err(
-            "additional permissions are disabled; enable `features.request_permission` before using `with_additional_permissions`"
+            "additional permissions are disabled; enable `features.request_permissions` before using `with_additional_permissions`"
                 .to_string(),
         );
     }
@@ -209,5 +209,70 @@ pub(super) async fn apply_granted_turn_permissions(
         sandbox_permissions,
         additional_permissions: effective_permissions,
         permissions_preapproved,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_and_validate_additional_permissions;
+    use crate::sandboxing::SandboxPermissions;
+    use codex_protocol::models::NetworkPermissions;
+    use codex_protocol::models::PermissionProfile;
+    use codex_protocol::protocol::AskForApproval;
+    use codex_protocol::protocol::RejectConfig;
+    use pretty_assertions::assert_eq;
+    use tempfile::tempdir;
+
+    fn network_permissions() -> PermissionProfile {
+        PermissionProfile {
+            network: Some(NetworkPermissions {
+                enabled: Some(true),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn preapproved_permissions_work_when_request_permissions_tool_is_enabled_without_inline_feature()
+     {
+        let cwd = tempdir().expect("tempdir");
+
+        let normalized = normalize_and_validate_additional_permissions(
+            true,
+            AskForApproval::Reject(RejectConfig {
+                sandbox_approval: false,
+                rules: false,
+                skill_approval: false,
+                request_permissions: true,
+                mcp_elicitations: false,
+            }),
+            SandboxPermissions::WithAdditionalPermissions,
+            Some(network_permissions()),
+            true,
+            cwd.path(),
+        )
+        .expect("preapproved permissions should be allowed");
+
+        assert_eq!(normalized, Some(network_permissions()));
+    }
+
+    #[test]
+    fn fresh_additional_permissions_still_require_request_permissions_feature() {
+        let cwd = tempdir().expect("tempdir");
+
+        let err = normalize_and_validate_additional_permissions(
+            false,
+            AskForApproval::OnRequest,
+            SandboxPermissions::WithAdditionalPermissions,
+            Some(network_permissions()),
+            false,
+            cwd.path(),
+        )
+        .expect_err("fresh inline permission requests should remain disabled");
+
+        assert_eq!(
+            err,
+            "additional permissions are disabled; enable `features.request_permissions` before using `with_additional_permissions`"
+        );
     }
 }
