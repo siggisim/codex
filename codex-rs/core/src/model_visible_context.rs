@@ -359,7 +359,7 @@ mod tests {
     #[test]
     fn detects_agents_instructions_fragment() {
         assert!(is_contextual_user_fragment(&ContentItem::InputText {
-            text: "<AGENTS.md INSTRUCTIONS FOR /tmp>\nbody\n</AGENTS.md INSTRUCTIONS FOR /tmp>"
+            text: "# AGENTS.md instructions for /tmp\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
                 .to_string(),
         }));
     }

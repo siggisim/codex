@@ -24,6 +24,9 @@ use codex_protocol::protocol::TurnContextItem;
 use crate::model_visible_context::AGENTS_MD_CLOSE_TAG_PREFIX;
 use crate::model_visible_context::AGENTS_MD_OPEN_TAG_PREFIX;
 
+const LEGACY_AGENTS_MD_START_MARKER: &str = "# AGENTS.md instructions for ";
+const LEGACY_AGENTS_MD_END_MARKER: &str = "</INSTRUCTIONS>";
+
 // ---------------------------------------------------------------------------
 // AGENTS instructions fragment
 // ---------------------------------------------------------------------------
@@ -39,12 +42,15 @@ impl ModelVisibleContextFragment for AgentsMdInstructions {
     type Role = ContextualUserContextRole;
 
     fn render_text(&self) -> String {
+        // TODO(ccunningham): Switch rendering to the XML-ish wrapper
+        // `<AGENTS.md INSTRUCTIONS FOR {dirname}>...` once we are ready to drop
+        // legacy AGENTS history compatibility.
         format!(
-            "{prefix}{directory}>\n{contents}\n{suffix}{directory}>",
-            prefix = AGENTS_MD_OPEN_TAG_PREFIX,
+            "{prefix}{directory}\n\n<INSTRUCTIONS>\n{contents}\n{suffix}",
+            prefix = LEGACY_AGENTS_MD_START_MARKER,
             directory = self.directory,
             contents = self.text,
-            suffix = AGENTS_MD_CLOSE_TAG_PREFIX,
+            suffix = LEGACY_AGENTS_MD_END_MARKER,
         )
     }
 }
@@ -84,10 +90,9 @@ impl ContextualUserFragmentDetector for AgentsMdInstructions {
             return remaining.trim_end().ends_with(&expected_close_tag);
         }
 
-        // TODO(ccunningham): Drop this legacy detector once pre-XML-ish AGENTS
-        // history no longer needs resume/compaction compatibility.
-        const LEGACY_AGENTS_MD_START_MARKER: &str = "# AGENTS.md instructions for ";
-        const LEGACY_AGENTS_MD_END_MARKER: &str = "</INSTRUCTIONS>";
+        // TODO(ccunningham): Drop the legacy detector and switch rendering to
+        // the XML-ish wrapper once old AGENTS history no longer needs
+        // resume/compaction compatibility.
         trimmed.starts_with(LEGACY_AGENTS_MD_START_MARKER)
             && trimmed.trim_end().ends_with(LEGACY_AGENTS_MD_END_MARKER)
     }
@@ -175,7 +180,7 @@ mod tests {
 
         assert_eq!(
             text,
-            "<AGENTS.md INSTRUCTIONS FOR test_directory>\ntest_text\n</AGENTS.md INSTRUCTIONS FOR test_directory>",
+            "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>",
         );
     }
 
@@ -183,18 +188,18 @@ mod tests {
     fn test_is_user_instructions() {
         assert!(crate::model_visible_context::is_contextual_user_fragment(
             &ContentItem::InputText {
-                text: "<AGENTS.md INSTRUCTIONS FOR test_directory>\ntest_text\n</AGENTS.md INSTRUCTIONS FOR test_directory>"
+                text: "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>"
                     .to_string(),
             }
         ));
         assert!(
             <AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
-                "<AGENTS.md INSTRUCTIONS FOR test_directory>\ntest_text\n</AGENTS.md INSTRUCTIONS FOR test_directory>"
+                "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>"
             )
         );
         assert!(
             <AgentsMdInstructions as ContextualUserFragmentDetector>::matches_contextual_user_text(
-                "# AGENTS.md instructions for test_directory\n\n<INSTRUCTIONS>\ntest_text\n</INSTRUCTIONS>"
+                "<AGENTS.md INSTRUCTIONS FOR test_directory>\ntest_text\n</AGENTS.md INSTRUCTIONS FOR test_directory>"
             )
         );
         assert!(
