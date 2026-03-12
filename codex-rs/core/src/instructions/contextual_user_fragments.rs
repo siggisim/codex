@@ -21,12 +21,12 @@ use crate::model_visible_context::TurnContextDiffFragment;
 use crate::model_visible_context::TurnContextDiffParams;
 use codex_protocol::protocol::TurnContextItem;
 
-const AGENTS_MD_START_MARKER: &str = "# AGENTS.md instructions for ";
-const AGENTS_MD_END_MARKER: &str = "</INSTRUCTIONS>";
-
 // ---------------------------------------------------------------------------
 // AGENTS instructions fragment
 // ---------------------------------------------------------------------------
+
+const AGENTS_MD_START_MARKER: &str = "# AGENTS.md instructions for ";
+const AGENTS_MD_END_MARKER: &str = "</INSTRUCTIONS>";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename = "user_instructions", rename_all = "snake_case")]
