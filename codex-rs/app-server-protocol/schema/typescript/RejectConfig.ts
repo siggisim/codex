@@ -16,7 +16,7 @@ rules: boolean,
  */
 skill_approval: boolean, 
 /**
- * Reject approval prompts related to built-in permission requests.
+ * Reject approval prompts related to inline `with_additional_permissions` requests.
  */
 request_permissions: boolean, 
 /**

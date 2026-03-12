@@ -6923,7 +6923,7 @@
         },
         "request_permissions": {
           "default": false,
-          "description": "Reject approval prompts related to built-in permission requests.",
+          "description": "Reject approval prompts related to inline `with_additional_permissions` requests.",
           "type": "boolean"
         },
         "rules": {
