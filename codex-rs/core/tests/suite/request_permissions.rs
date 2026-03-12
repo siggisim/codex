@@ -426,6 +426,7 @@ async fn request_permissions_tool_still_prompts_when_reject_request_permissions_
     let requested_dir = test.workspace_path("request-permissions-reject");
     fs::create_dir_all(&requested_dir)?;
     let requested_permissions = requested_directory_write_permissions(&requested_dir);
+    let normalized_requested_permissions = normalized_directory_write_permissions(&requested_dir)?;
     let call_id = "request_permissions_reject_still_prompts";
     let event = request_permissions_tool_event(
         call_id,
@@ -460,12 +461,15 @@ async fn request_permissions_tool_still_prompts_when_reject_request_permissions_
     .await?;
 
     let granted_permissions = expect_request_permissions_event(&test, call_id).await;
-    assert_eq!(granted_permissions, requested_permissions.clone());
+    assert_eq!(
+        granted_permissions,
+        normalized_requested_permissions.clone()
+    );
     test.codex
         .submit(Op::RequestPermissionsResponse {
             id: call_id.to_string(),
             response: RequestPermissionsResponse {
-                permissions: requested_permissions.clone(),
+                permissions: normalized_requested_permissions.clone(),
                 scope: PermissionGrantScope::Turn,
             },
         })
@@ -479,7 +483,7 @@ async fn request_permissions_tool_still_prompts_when_reject_request_permissions_
     assert_eq!(
         result,
         RequestPermissionsResponse {
-            permissions: requested_permissions,
+            permissions: normalized_requested_permissions,
             scope: PermissionGrantScope::Turn,
         }
     );

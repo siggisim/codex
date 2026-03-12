@@ -114,7 +114,8 @@ pub(crate) fn normalize_and_validate_additional_permissions(
         SandboxPermissions::WithAdditionalPermissions
     );
 
-    if !additional_permissions_allowed
+    if !permissions_preapproved
+        && !additional_permissions_allowed
         && (uses_additional_permissions || additional_permissions.is_some())
     {
         return Err(
@@ -238,7 +239,7 @@ mod tests {
         let cwd = tempdir().expect("tempdir");
 
         let normalized = normalize_and_validate_additional_permissions(
-            true,
+            false,
             AskForApproval::Reject(RejectConfig {
                 sandbox_approval: false,
                 rules: false,
