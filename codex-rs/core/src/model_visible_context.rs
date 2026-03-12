@@ -18,8 +18,6 @@ use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::TurnContextItem;
 
-pub(crate) const AGENTS_MD_OPEN_TAG_PREFIX: &str = "<AGENTS.md INSTRUCTIONS FOR ";
-pub(crate) const AGENTS_MD_CLOSE_TAG_PREFIX: &str = "</AGENTS.md INSTRUCTIONS FOR ";
 pub(crate) const SKILL_OPEN_TAG: &str = "<skill>";
 pub(crate) const SKILL_CLOSE_TAG: &str = "</skill>";
 pub(crate) const USER_SHELL_COMMAND_OPEN_TAG: &str = "<user_shell_command>";
@@ -297,6 +295,16 @@ const REGISTERED_CONTEXTUAL_USER_FRAGMENTS: &[ContextualUserFragmentRegistration
     ),
 ];
 
+fn is_legacy_contextual_user_fragment(text: &str) -> bool {
+    // TODO(ccunningham): Drop this once old user-role subagent notification
+    // history no longer needs resume/compaction compatibility.
+    ContextualUserFragmentMarkers::new(
+        SUBAGENT_NOTIFICATION_OPEN_TAG,
+        SUBAGENT_NOTIFICATION_CLOSE_TAG,
+    )
+    .matches_text(text)
+}
+
 pub(crate) fn is_contextual_user_fragment(content_item: &ContentItem) -> bool {
     let ContentItem::InputText { text } = content_item else {
         return false;
@@ -304,6 +312,7 @@ pub(crate) fn is_contextual_user_fragment(content_item: &ContentItem) -> bool {
     REGISTERED_CONTEXTUAL_USER_FRAGMENTS
         .iter()
         .any(|registration| (registration.detect)(text))
+        || is_legacy_contextual_user_fragment(text)
 }
 
 pub(crate) fn build_contextual_user_turn_state_fragments(
@@ -360,6 +369,14 @@ mod tests {
     fn detects_agents_instructions_fragment() {
         assert!(is_contextual_user_fragment(&ContentItem::InputText {
             text: "# AGENTS.md instructions for /tmp\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
+                .to_string(),
+        }));
+    }
+
+    #[test]
+    fn detects_legacy_subagent_notification_fragment() {
+        assert!(is_contextual_user_fragment(&ContentItem::InputText {
+            text: "<subagent_notification>\n{\"agent_id\":\"a\",\"status\":\"completed\"}\n</subagent_notification>"
                 .to_string(),
         }));
     }
