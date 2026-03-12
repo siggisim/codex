@@ -2,7 +2,7 @@ actions:
   - name: Test
     container_image: ubuntu-22.04
     resource_requests:
-      disk: 27GB
+      disk: 32GB
     triggers:
       push:
         branches:
