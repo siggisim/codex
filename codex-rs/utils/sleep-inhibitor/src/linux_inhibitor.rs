@@ -8,7 +8,7 @@ const ASSERTION_REASON: &str = "Codex is running an active turn";
 const APP_ID: &str = "codex";
 // Keep the blocker process alive "long enough" without needing restarts.
 // This is `i32::MAX` seconds, which is accepted by common `sleep` implementations.
-const BLOCKER_SLEEP_SECONDS: &str = "2147483647";
+const BLOCKER_SLEEP_SECONDS: &str = "2147483646";
 
 #[derive(Debug, Default)]
 pub(crate) struct LinuxSleepInhibitor {
