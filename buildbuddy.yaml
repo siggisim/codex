@@ -11,4 +11,4 @@ actions:
         branches:
           - "*"
     steps:
-      - run: "bazel test //... --config=remote --strategy=remote --platforms=//:rbe"
+      - run: "bazel test //... --config=remote --strategy=remote --platforms=//:rbe --remote_download_minimal"
