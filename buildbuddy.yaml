@@ -1,0 +1,14 @@
+actions:
+  - name: Test
+    container_image: ubuntu-22.04
+    resource_requests:
+      disk: 27GB
+    triggers:
+      push:
+        branches:
+          - "*"
+      pull_request:
+        branches:
+          - "*"
+    steps:
+      - run: "bazel test //... --config=remote --strategy=remote --platforms=//:rbe"
