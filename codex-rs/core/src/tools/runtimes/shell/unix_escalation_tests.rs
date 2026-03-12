@@ -36,6 +36,7 @@ use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
+use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::SkillScope;
 use codex_shell_escalation::EscalationExecution;
@@ -65,6 +66,19 @@ fn host_absolute_path(segments: &[&str]) -> String {
 
 fn starlark_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn read_only_file_system_sandbox_policy() -> FileSystemSandboxPolicy {
+    FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+        path: FileSystemPath::Special {
+            value: FileSystemSpecialPath::Root,
+        },
+        access: FileSystemAccessMode::Read,
+    }])
+}
+
+fn unrestricted_file_system_sandbox_policy() -> FileSystemSandboxPolicy {
+    FileSystemSandboxPolicy::unrestricted()
 }
 
 fn test_skill_metadata(permission_profile: Option<PermissionProfile>) -> SkillMetadata {
@@ -347,9 +361,7 @@ fn evaluate_intercepted_exec_policy_uses_wrapper_command_when_shell_wrapper_pars
         InterceptedExecPolicyContext {
             approval_policy: AskForApproval::OnRequest,
             sandbox_policy: &SandboxPolicy::new_read_only_policy(),
-            file_system_sandbox_policy: &FileSystemSandboxPolicy::from(
-                &SandboxPolicy::new_read_only_policy(),
-            ),
+            file_system_sandbox_policy: &read_only_file_system_sandbox_policy(),
             sandbox_permissions: SandboxPermissions::UseDefault,
             enable_shell_wrapper_parsing: enable_intercepted_exec_policy_shell_wrapper_parsing,
         },
@@ -400,9 +412,7 @@ fn evaluate_intercepted_exec_policy_matches_inner_shell_commands_when_enabled() 
         InterceptedExecPolicyContext {
             approval_policy: AskForApproval::OnRequest,
             sandbox_policy: &SandboxPolicy::new_read_only_policy(),
-            file_system_sandbox_policy: &FileSystemSandboxPolicy::from(
-                &SandboxPolicy::new_read_only_policy(),
-            ),
+            file_system_sandbox_policy: &read_only_file_system_sandbox_policy(),
             sandbox_permissions: SandboxPermissions::UseDefault,
             enable_shell_wrapper_parsing: enable_intercepted_exec_policy_shell_wrapper_parsing,
         },
@@ -444,9 +454,7 @@ host_executable(name = "git", paths = ["{git_path_literal}"])
         InterceptedExecPolicyContext {
             approval_policy: AskForApproval::OnRequest,
             sandbox_policy: &SandboxPolicy::new_read_only_policy(),
-            file_system_sandbox_policy: &FileSystemSandboxPolicy::from(
-                &SandboxPolicy::new_read_only_policy(),
-            ),
+            file_system_sandbox_policy: &read_only_file_system_sandbox_policy(),
             sandbox_permissions: SandboxPermissions::UseDefault,
             enable_shell_wrapper_parsing: false,
         },
@@ -493,9 +501,7 @@ host_executable(name = "git", paths = ["{allowed_git_literal}"])
         InterceptedExecPolicyContext {
             approval_policy: AskForApproval::OnRequest,
             sandbox_policy: &SandboxPolicy::new_read_only_policy(),
-            file_system_sandbox_policy: &FileSystemSandboxPolicy::from(
-                &SandboxPolicy::new_read_only_policy(),
-            ),
+            file_system_sandbox_policy: &read_only_file_system_sandbox_policy(),
             sandbox_permissions: SandboxPermissions::UseDefault,
             enable_shell_wrapper_parsing: false,
         },
@@ -523,9 +529,7 @@ async fn prepare_escalated_exec_turn_default_preserves_macos_seatbelt_extensions
         network: None,
         sandbox: SandboxType::None,
         sandbox_policy: SandboxPolicy::new_read_only_policy(),
-        file_system_sandbox_policy: FileSystemSandboxPolicy::from(
-            &SandboxPolicy::new_read_only_policy(),
-        ),
+        file_system_sandbox_policy: read_only_file_system_sandbox_policy(),
         network_sandbox_policy: NetworkSandboxPolicy::Restricted,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         sandbox_permissions: SandboxPermissions::UseDefault,
@@ -577,7 +581,7 @@ async fn prepare_escalated_exec_permissions_preserve_macos_seatbelt_extensions()
         network: None,
         sandbox: SandboxType::None,
         sandbox_policy: SandboxPolicy::DangerFullAccess,
-        file_system_sandbox_policy: FileSystemSandboxPolicy::from(&SandboxPolicy::DangerFullAccess),
+        file_system_sandbox_policy: unrestricted_file_system_sandbox_policy(),
         network_sandbox_policy: NetworkSandboxPolicy::Enabled,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         sandbox_permissions: SandboxPermissions::UseDefault,
@@ -592,9 +596,7 @@ async fn prepare_escalated_exec_permissions_preserve_macos_seatbelt_extensions()
     let permissions = Permissions {
         approval_policy: Constrained::allow_any(AskForApproval::Never),
         sandbox_policy: Constrained::allow_any(SandboxPolicy::new_read_only_policy()),
-        file_system_sandbox_policy: codex_protocol::permissions::FileSystemSandboxPolicy::from(
-            &SandboxPolicy::new_read_only_policy(),
-        ),
+        file_system_sandbox_policy: read_only_file_system_sandbox_policy(),
         network_sandbox_policy: codex_protocol::permissions::NetworkSandboxPolicy::Restricted,
         network: None,
         allow_login_shell: true,
@@ -653,7 +655,7 @@ async fn prepare_escalated_exec_permission_profile_unions_turn_and_requested_mac
         network: None,
         sandbox: SandboxType::None,
         sandbox_policy: sandbox_policy.clone(),
-        file_system_sandbox_policy: FileSystemSandboxPolicy::from(&sandbox_policy),
+        file_system_sandbox_policy: read_only_file_system_sandbox_policy(),
         network_sandbox_policy: NetworkSandboxPolicy::from(&sandbox_policy),
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
         sandbox_permissions: SandboxPermissions::UseDefault,
